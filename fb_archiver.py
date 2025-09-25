@@ -51,6 +51,7 @@ DSGVO-HINWEIS
   Zugriff im Archiv ggf. mit Sperrfristen regeln.
 """
 
+
 import argparse
 import hashlib
 import json
@@ -71,6 +72,7 @@ try:
     from dateutil import parser as dtparse
 except Exception:
     import datetime as _dt
+
     class _FallbackParser:
         @staticmethod
         def parse(s: str):
@@ -84,15 +86,18 @@ except Exception:
                 return _dt.datetime.fromisoformat(s)  # Python 3.11: robust
             except Exception:
                 return _dt.datetime.utcnow()
+
     dtparse = _FallbackParser()
 
 GRAPH = "https://graph.facebook.com/v19.0"
+
 
 @dataclass
 class PageInfo:
     id: str
     name: str
     link: Optional[str]
+
 
 def iso8601(dt: Optional[str]) -> Optional[str]:
     if not dt:
@@ -102,14 +107,23 @@ def iso8601(dt: Optional[str]) -> Optional[str]:
     except Exception:
         return dt
 
+
 def safe_filename(name: str) -> str:
     name = name.strip().replace(" ", "_")
     return re.sub(r"[^A-Za-z0-9_.-]", "-", name)[:200]
 
+
 class FacebookArchiver:
-    def __init__(self, page: str, access_token: str, outdir: str,
-                 since: Optional[str] = None, until: Optional[str] = None,
-                 media: bool = True, limit: int = 100):
+    def __init__(
+        self,
+        page: str,
+        access_token: str,
+        outdir: str,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        media: bool = True,
+        limit: int = 100,
+    ):
         self.page = page
         self.token = access_token
         self.outdir = outdir
@@ -141,7 +155,7 @@ class FacebookArchiver:
             if r.status_code == 200:
                 return r.json()
 
-            # Bei temporÃ¤ren Fehlern: wiederholen
+            # Bei temporären Fehlern: wiederholen
             if r.status_code in (429, 500, 502, 503, 504):
                 retries += 1
                 if retries > max_retries:
@@ -151,7 +165,9 @@ class FacebookArchiver:
 
                 retry_after = int(r.headers.get("Retry-After", "5"))
                 wait_time = min(retry_after, 30)
-                print(f"[WARN] Graph API {r.status_code}, retry {retries}/{max_retries} in {wait_time}s ...")
+                print(
+                    f"[WARN] Graph API {r.status_code}, retry {retries}/{max_retries} in {wait_time}s ..."
+                )
                 time.sleep(wait_time)
                 continue
 
@@ -160,14 +176,25 @@ class FacebookArchiver:
 
     def get_page_info(self) -> PageInfo:
         data = self.graph_get(self.page, {"fields": "id,name,link"})
-        self.page_info = PageInfo(id=data["id"], name=data.get("name", self.page), link=data.get("link"))
+        self.page_info = PageInfo(
+            id=data["id"], name=data.get("name", self.page), link=data.get("link")
+        )
         return self.page_info
 
     def iter_posts(self) -> Iterable[Dict]:
         fields = [
-            "id","created_time","message","permalink_url","status_type","story",
-            "shares","is_published","updated_time",
-            "from","to","with_tags",
+            "id",
+            "created_time",
+            "message",
+            "permalink_url",
+            "status_type",
+            "story",
+            "shares",
+            "is_published",
+            "updated_time",
+            "from",
+            "to",
+            "with_tags",
             "reactions.limit(0).summary(total_count)",
             "attachments{media_type,media,target,unshimmed_url,url,description,title}",
         ]
@@ -195,10 +222,14 @@ class FacebookArchiver:
                                     f"Graph paging error {r.status_code} after retries: {r.text}"
                                 )
                             wait_time = min(int(r.headers.get("Retry-After", "5")), 30)
-                            print(f"[WARN] Paging error {r.status_code}, retry {retries}/5 in {wait_time}s ...")
+                            print(
+                                f"[WARN] Paging error {r.status_code}, retry {retries}/5 in {wait_time}s ..."
+                            )
                             time.sleep(wait_time)
                             continue
-                        raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                        raise RuntimeError(
+                            f"Graph paging error {r.status_code}: {r.text}"
+                        )
                 else:
                     data = self.graph_get(endpoint, params)
 
@@ -211,10 +242,14 @@ class FacebookArchiver:
                 if not next_url:
                     break
 
-
-    def get_comments_for_post(self, post_or_comment_id: str, depth: int = 0, parent: Optional[str] = None) -> Iterable[Dict]:
+    def get_comments_for_post(
+        self, post_or_comment_id: str, depth: int = 0, parent: Optional[str] = None
+    ) -> Iterable[Dict]:
         fields = [
-            "id","created_time","message","permalink_url",
+            "id",
+            "created_time",
+            "message",
+            "permalink_url",
             "from{id,name}",
             "comment_count",
             "parent{id}",
@@ -238,7 +273,49 @@ class FacebookArchiver:
                 # Rekursiv Replies holen
                 if c.get("comment_count") and int(c.get("comment_count")) > 0:
                     sub_id = c.get("id")
-                    yield from self.get_comments_for_post(sub_id, depth=depth+1, parent=sub_id)
+                    yield from self.get_comments_for_post(
+                        sub_id, depth=depth + 1, parent=sub_id
+                    )
+            paging = data.get("paging", {})
+            next_url = paging.get("next")
+            if not next_url:
+                break
+
+    def get_conversations(self) -> Iterable[Dict]:
+        """Liefert alle Inbox-Konversationen der Seite zurück."""
+        endpoint = f"{self.page_info.id}/conversations"
+        params = {"fields": "id,updated_time,link,participants"}
+        next_url = None
+        while True:
+            if next_url:
+                r = self.session.get(next_url, timeout=60)
+                if r.status_code != 200:
+                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                data = r.json()
+            else:
+                data = self.graph_get(endpoint, params)
+            for conv in data.get("data", []):
+                yield conv
+            paging = data.get("paging", {})
+            next_url = paging.get("next")
+            if not next_url:
+                break
+
+    def get_messages(self, conversation_id: str) -> Iterable[Dict]:
+        """Liefert alle Nachrichten einer Konversation."""
+        endpoint = f"{conversation_id}/messages"
+        params = {"fields": "id,from,to,message,created_time,attachments"}
+        next_url = None
+        while True:
+            if next_url:
+                r = self.session.get(next_url, timeout=60)
+                if r.status_code != 200:
+                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                data = r.json()
+            else:
+                data = self.graph_get(endpoint, params)
+            for msg in data.get("data", []):
+                yield msg
             paging = data.get("paging", {})
             next_url = paging.get("next")
             if not next_url:
@@ -254,14 +331,18 @@ class FacebookArchiver:
             src = None
             subdir = "images"
             if mtype in ("photo", "image"):
-                src = (media.get("image") or {}).get("src") or a.get("unshimmed_url") or a.get("url")
-                subdir = "images" 
+                src = (
+                    (media.get("image") or {}).get("src")
+                    or a.get("unshimmed_url")
+                    or a.get("url")
+                )
+                subdir = "images"
             elif mtype in ("video", "native_video"):
-                # Versuch, Video direkt Ã¼ber /videos zu holen
+                # Versuch, Video direkt über /videos zu holen
                 self.download_video_from_post(post.get("id"))
                 continue
             else:
-                # Links/Alben etc. Ã¼berspringen
+                # Links/Alben etc. überspringen
                 continue
             if not src:
                 continue
@@ -286,7 +367,7 @@ class FacebookArchiver:
                 if chunk:
                     f.write(chunk)
         return local
-    
+
     def download_video_from_post(self, post_id: str) -> Optional[str]:
         try:
             data = self.graph_get(post_id, {"fields": "id,source,title,description"})
@@ -348,7 +429,6 @@ Hinweise:
         with open(self.path("README.txt"), "w", encoding="utf-8") as f:
             f.write(txt)
 
-
     def append_sources_manifest(self, line: str):
         with open(self.path("manifests", "sources.txt"), "a", encoding="utf-8") as f:
             f.write(line.rstrip("\n") + "\n")
@@ -381,7 +461,9 @@ Hinweise:
 
         # Dateien vorbereiten
         posts_jsonl = open(self.path("data", "posts.jsonl"), "w", encoding="utf-8")
-        comments_jsonl = open(self.path("data", "comments.jsonl"), "w", encoding="utf-8")
+        comments_jsonl = open(
+            self.path("data", "comments.jsonl"), "w", encoding="utf-8"
+        )
         posts_rows: List[Dict] = []
         comments_rows: List[Dict] = []
 
@@ -392,35 +474,43 @@ Hinweise:
             updated = iso8601(post.get("updated_time"))
             msg = (post.get("message") or "").replace("\n", " ").strip()
             perma = post.get("permalink_url")
-            reacts = ((post.get("reactions") or {}).get("summary") or {}).get("total_count")
+            reacts = ((post.get("reactions") or {}).get("summary") or {}).get(
+                "total_count"
+            )
             shares = (post.get("shares") or {}).get("count")
 
-            posts_rows.append({
-                "post_id": pid,
-                "created_time": created,
-                "updated_time": updated,
-                "permalink_url": perma,
-                "message": msg,
-                "reactions_total": reacts,
-                "shares_count": shares,
-            })
+            posts_rows.append(
+                {
+                    "post_id": pid,
+                    "created_time": created,
+                    "updated_time": updated,
+                    "permalink_url": perma,
+                    "message": msg,
+                    "reactions_total": reacts,
+                    "shares_count": shares,
+                }
+            )
             posts_jsonl.write(json.dumps(post, ensure_ascii=False) + "\n")
 
             # Kommentare (rekursiv inkl. Replies)
             try:
                 for c in self.get_comments_for_post(pid, depth=0, parent=None):
-                    comments_rows.append({
-                        "post_id": pid,
-                        "comment_id": c.get("id"),
-                        "created_time": iso8601(c.get("created_time")),
-                        "author_id": ((c.get("from") or {}).get("id")),
-                        "author_name": ((c.get("from") or {}).get("name")),
-                        "message": (c.get("message") or "").replace("\n", " ").strip(),
-                        "like_count": c.get("like_count"),
-                        "parent_id": c.get("parent_id"),
-                        "depth": c.get("depth"),
-                        "permalink_url": c.get("permalink_url"),
-                    })
+                    comments_rows.append(
+                        {
+                            "post_id": pid,
+                            "comment_id": c.get("id"),
+                            "created_time": iso8601(c.get("created_time")),
+                            "author_id": ((c.get("from") or {}).get("id")),
+                            "author_name": ((c.get("from") or {}).get("name")),
+                            "message": (c.get("message") or "")
+                            .replace("\n", " ")
+                            .strip(),
+                            "like_count": c.get("like_count"),
+                            "parent_id": c.get("parent_id"),
+                            "depth": c.get("depth"),
+                            "permalink_url": c.get("permalink_url"),
+                        }
+                    )
                     comments_jsonl.write(json.dumps(c, ensure_ascii=False) + "\n")
             except Exception as e:
                 self.append_sources_manifest(f"WARN comments for {pid}: {e}")
@@ -435,7 +525,9 @@ Hinweise:
         comments_jsonl.close()
 
         # Inbox-Konversationen archivieren
-        conv_jsonl = open(self.path("data", "conversations.jsonl"), "w", encoding="utf-8")
+        conv_jsonl = open(
+            self.path("data", "conversations.jsonl"), "w", encoding="utf-8"
+        )
         msg_jsonl = open(self.path("data", "messages.jsonl"), "w", encoding="utf-8")
         conv_rows: List[Dict] = []
         msg_rows: List[Dict] = []
@@ -444,25 +536,43 @@ Hinweise:
             for conv in self.get_conversations():
                 conv_id = conv.get("id")
                 conv_jsonl.write(json.dumps(conv, ensure_ascii=False) + "\n")
-                conv_rows.append({
-                    "conversation_id": conv_id,
-                    "updated_time": iso8601(conv.get("updated_time")),
-                    "link": conv.get("link"),
-                    "participants": ", ".join(
-                        [p.get("name") for p in (conv.get("participants", {}).get("data", []))]
-                    ),
-                })
+                conv_rows.append(
+                    {
+                        "conversation_id": conv_id,
+                        "updated_time": iso8601(conv.get("updated_time")),
+                        "link": conv.get("link"),
+                        "participants": ", ".join(
+                            [
+                                p.get("name")
+                                for p in (conv.get("participants", {}).get("data", []))
+                            ]
+                        ),
+                    }
+                )
                 # Nachrichten innerhalb der Konversation
                 for msg in self.get_messages(conv_id):
                     msg_jsonl.write(json.dumps(msg, ensure_ascii=False) + "\n")
-                    msg_rows.append({
-                        "conversation_id": conv_id,
-                        "message_id": msg.get("id"),
-                        "created_time": iso8601(msg.get("created_time")),
-                        "from": (msg.get("from") or {}).get("name"),
-                        "to": ", ".join([t.get("name") for t in msg.get("to", {}).get("data", [])]) if msg.get("to") else None,
-                        "message": (msg.get("message") or "").replace("\n", " ").strip(),
-                    })
+                    msg_rows.append(
+                        {
+                            "conversation_id": conv_id,
+                            "message_id": msg.get("id"),
+                            "created_time": iso8601(msg.get("created_time")),
+                            "from": (msg.get("from") or {}).get("name"),
+                            "to": (
+                                ", ".join(
+                                    [
+                                        t.get("name")
+                                        for t in msg.get("to", {}).get("data", [])
+                                    ]
+                                )
+                                if msg.get("to")
+                                else None
+                            ),
+                            "message": (msg.get("message") or "")
+                            .replace("\n", " ")
+                            .strip(),
+                        }
+                    )
         except Exception as e:
             self.append_sources_manifest(f"WARN conversations/messages: {e}")
 
@@ -470,32 +580,52 @@ Hinweise:
         msg_jsonl.close()
 
         if conv_rows:
-            pd.DataFrame(conv_rows).to_csv(self.path("data", "conversations.csv"), index=False)
+            pd.DataFrame(conv_rows).to_csv(
+                self.path("data", "conversations.csv"), index=False
+            )
         if msg_rows:
-            pd.DataFrame(msg_rows).to_csv(self.path("data", "messages.csv"), index=False)
-
+            pd.DataFrame(msg_rows).to_csv(
+                self.path("data", "messages.csv"), index=False
+            )
 
         # CSV schreiben
         if posts_rows:
             pd.DataFrame(posts_rows).to_csv(self.path("data", "posts.csv"), index=False)
         if comments_rows:
-            pd.DataFrame(comments_rows).to_csv(self.path("data", "comments.csv"), index=False)
+            pd.DataFrame(comments_rows).to_csv(
+                self.path("data", "comments.csv"), index=False
+            )
 
         # Checksums
         self.write_checksums()
 
         print(f"Fertig. Archiv unter: {self.outdir}")
 
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Facebook Page Archiv (Graph API)")
-    ap.add_argument("--page", required=True, help="Seitenname oder ID (z.B. StadtMannheim)")
-    ap.add_argument("--access-token", required=True, help="Page Access Token mit pages_read_* Rechten")
+    ap.add_argument(
+        "--page", required=True, help="Seitenname oder ID (z.B. StadtMannheim)"
+    )
+    ap.add_argument(
+        "--access-token",
+        required=True,
+        help="Page Access Token mit pages_read_* Rechten",
+    )
     ap.add_argument("--out", default="./fb_archive_out", help="Ausgabeverzeichnis")
     ap.add_argument("--since", help="ab Datum (YYYY-MM-DD)")
     ap.add_argument("--until", help="bis Datum (YYYY-MM-DD)")
-    ap.add_argument("--no-media", action="store_true", help="keine Medien herunterladen")
-    ap.add_argument("--limit", type=int, default=100, help="API-Seitenlimit pro Anfrage (Standard 100)")
+    ap.add_argument(
+        "--no-media", action="store_true", help="keine Medien herunterladen"
+    )
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        help="API-Seitenlimit pro Anfrage (Standard 100)",
+    )
     return ap.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_args()
