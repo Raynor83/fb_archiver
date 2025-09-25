@@ -245,7 +245,7 @@ class FacebookArchiver:
                 break
 
     def get_conversations(self) -> Iterable[Dict]:
-        """Liefert alle Inbox-Konversationen der Seite zurÃ¼ck."""
+        """Liefert alle Inbox-Konversationen der Seite zurück."""
         endpoint = f"{self.page_info.id}/conversations"
         params = {"fields": "id,updated_time,link,participants"}
         next_url = None
@@ -285,7 +285,7 @@ class FacebookArchiver:
                 break
 
     def download_media_from_post(self, post: Dict) -> List[Tuple[str, str]]:
-        """Gibt Liste (local_path, source_url) zurÃ¼ck fÃ¼r gespeicherte Dateien."""
+        """Gibt Liste (local_path, source_url) zurück für gespeicherte Dateien."""
         saved: List[Tuple[str, str]] = []
         atts = (post.get("attachments") or {}).get("data") or []
         for a in atts:
