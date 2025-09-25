@@ -6,22 +6,24 @@ FUNKTION
 - Holt Beiträge (Posts) einer Facebook-Seite inkl. zentraler Metadaten
 - Holt Reaktionen (nur Summen), Shares (Summe), Kommentare (Text, Autor, Zeit)
 - Unterstützt verschachtelte Kommentare (Replies) für vollständige Diskussionsthreads
-- CSV-Ausgabe enthält Tiefe (`depth`) und Parent-Kommentar-ID
-- Sichert Medien (Bilder/Videos) soweit über die API/Permalinks zugänglich (best effort)
+- Holt optional Inbox-Konversationen & Nachrichten (sofern Access Token die Rechte hat)
+- CSV-Ausgaben enthalten zusätzliche Struktur-Infos (z. B. depth, parent_id)
+- Sichert Medien (Bilder/Videos), soweit über die API/Permalinks zugänglich (best effort)
 - Schreibt alles als JSONL (maschinell) + CSV (Übersicht) + Checksums
 - Legt eine einfache, archivfreundliche Verzeichnisstruktur an
 
 WICHTIG
 - Arbeitet mit der offiziellen Facebook Graph API.
 - Archiviert öffentliche Inhalte einer Facebook-Seite, für die ihr berechtigt seid.
-- Private Nachrichten/Inbox oder Insights sind NICHT enthalten (separate Berechtigungen nötig).
-- Für Profile/Gruppen gelten andere bzw. eingeschränkte API-Regeln.
+- Nachrichten/Inbox werden nur archiviert, wenn das Token die Scopes
+  `pages_manage_inbox` und `pages_messaging` besitzt.
+- Private Profile/Gruppen sind nicht unterstützt (API-Beschränkung).
 
 VORAUSSETZUNGEN
 - Python 3.9+
 - pip install -r requirements.txt
   (requests, python-dateutil, tqdm, pandas)
-- Facebook-App + Page-Access-Token (Scopes: pages_read_engagement, pages_read_user_content)
+- Facebook-App + Page-Access-Token mit den nötigen Scopes
 
 BEISPIEL
     python fb_archiver.py \
@@ -34,20 +36,19 @@ BEISPIEL
 AUSGABE
 archive_Marchivum/
   ├─ data/
-  │   ├─ posts.jsonl                # 1 JSON pro Zeile (vollständige Datensätze)
-  │   ├─ comments.jsonl             # inkl. Replies (verschachtelte Kommentare)
-  │   ├─ posts.csv                  # tabellarische Übersicht
-  │   └─ comments.csv               # Spalten: post_id, comment_id, created_time, author_id, author_name, message, like_count, parent_id, depth, permalink_url
-  ├─ media/                         # heruntergeladene Medien
-  │   ├─ images/...
-  │   └─ videos/...
+  │   ├─ posts.jsonl, posts.csv
+  │   ├─ comments.jsonl, comments.csv
+  │   ├─ conversations.jsonl, conversations.csv   # Inbox-Daten (falls Token-Rechte vorhanden)
+  │   └─ messages.jsonl, messages.csv             # Nachrichten (falls Token-Rechte vorhanden)
+  ├─ media/ (images/..., videos/...)
   ├─ manifests/
-  │   ├─ checksums.sha256           # Prüfsummen aller Dateien
-  │   └─ sources.txt                # Abfrage- und Kontextsinfos (Provenienz)
-  └─ README.txt                     # Kurzbeschreibung + Provenienz
+  │   ├─ checksums.sha256
+  │   └─ sources.txt
+  └─ README.txt
 
 DSGVO-HINWEIS
-- Kommentare enthalten personenbezogene Daten: Zugriff im Archiv ggf. mit Sperrfristen regeln.
+- Kommentare und Nachrichten enthalten personenbezogene Daten:
+  Zugriff im Archiv ggf. mit Sperrfristen regeln.
 """
 
 import argparse
@@ -140,7 +141,7 @@ class FacebookArchiver:
             if r.status_code == 200:
                 return r.json()
 
-            # Bei temporären Fehlern: wiederholen
+            # Bei temporÃ¤ren Fehlern: wiederholen
             if r.status_code in (429, 500, 502, 503, 504):
                 retries += 1
                 if retries > max_retries:
@@ -243,8 +244,48 @@ class FacebookArchiver:
             if not next_url:
                 break
 
+    def get_conversations(self) -> Iterable[Dict]:
+        """Liefert alle Inbox-Konversationen der Seite zurÃ¼ck."""
+        endpoint = f"{self.page_info.id}/conversations"
+        params = {"fields": "id,updated_time,link,participants"}
+        next_url = None
+        while True:
+            if next_url:
+                r = self.session.get(next_url, timeout=60)
+                if r.status_code != 200:
+                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                data = r.json()
+            else:
+                data = self.graph_get(endpoint, params)
+            for conv in data.get("data", []):
+                yield conv
+            paging = data.get("paging", {})
+            next_url = paging.get("next")
+            if not next_url:
+                break
+
+    def get_messages(self, conversation_id: str) -> Iterable[Dict]:
+        """Liefert alle Nachrichten einer Konversation."""
+        endpoint = f"{conversation_id}/messages"
+        params = {"fields": "id,from,to,message,created_time,attachments"}
+        next_url = None
+        while True:
+            if next_url:
+                r = self.session.get(next_url, timeout=60)
+                if r.status_code != 200:
+                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                data = r.json()
+            else:
+                data = self.graph_get(endpoint, params)
+            for msg in data.get("data", []):
+                yield msg
+            paging = data.get("paging", {})
+            next_url = paging.get("next")
+            if not next_url:
+                break
+
     def download_media_from_post(self, post: Dict) -> List[Tuple[str, str]]:
-        """Gibt Liste (local_path, source_url) zurück für gespeicherte Dateien."""
+        """Gibt Liste (local_path, source_url) zurÃ¼ck fÃ¼r gespeicherte Dateien."""
         saved: List[Tuple[str, str]] = []
         atts = (post.get("attachments") or {}).get("data") or []
         for a in atts:
@@ -256,11 +297,11 @@ class FacebookArchiver:
                 src = (media.get("image") or {}).get("src") or a.get("unshimmed_url") or a.get("url")
                 subdir = "images" 
             elif mtype in ("video", "native_video"):
-                # Versuch, Video direkt über /videos zu holen
+                # Versuch, Video direkt Ã¼ber /videos zu holen
                 self.download_video_from_post(post.get("id"))
                 continue
             else:
-                # Links/Alben etc. überspringen
+                # Links/Alben etc. Ã¼berspringen
                 continue
             if not src:
                 continue
@@ -330,18 +371,23 @@ Abfragefenster: since={self.since or '-'} until={self.until or '-'}
 Token-Hinweis: Page Access Token (nicht abgelegt)
 
 Inhalte:
-- data/posts.jsonl, data/comments.jsonl — maschinelle Rohdaten
+- data/posts.jsonl, data/comments.jsonl — maschinelle Rohdaten der Chronik
 - data/posts.csv, data/comments.csv — Übersicht (comments.csv inkl. depth/parent_id)
+- data/conversations.jsonl, data/messages.jsonl — Inbox-Rohdaten (falls Rechte vorhanden)
+- data/conversations.csv, data/messages.csv — Übersicht der Konversationen und Nachrichten
 - media/images, media/videos — heruntergeladene Medien (best effort)
 - manifests/checksums.sha256 — Prüfsummen aller Dateien
 - manifests/sources.txt — API-Endpunkte & Parameter / Warnungen
 
 Hinweise:
-- Kommentare enthalten personenbezogene Daten. Zugriff ggf. beschränken.
+- Kommentare und Nachrichten enthalten personenbezogene Daten. Zugriff ggf. beschränken (DSGVO!).
 - Medien-Downloads sind best effort; manche Videos/Bilder sind nicht direkt abrufbar.
+- Nachrichten-Archivierung erfordert zusätzliche Berechtigungen im Access Token:
+  pages_manage_inbox und pages_messaging.
 """.strip()
         with open(self.path("README.txt"), "w", encoding="utf-8") as f:
             f.write(txt)
+
 
     def append_sources_manifest(self, line: str):
         with open(self.path("manifests", "sources.txt"), "a", encoding="utf-8") as f:
@@ -427,6 +473,47 @@ Hinweise:
 
         posts_jsonl.close()
         comments_jsonl.close()
+
+        # Inbox-Konversationen archivieren
+        conv_jsonl = open(self.path("data", "conversations.jsonl"), "w", encoding="utf-8")
+        msg_jsonl = open(self.path("data", "messages.jsonl"), "w", encoding="utf-8")
+        conv_rows: List[Dict] = []
+        msg_rows: List[Dict] = []
+
+        try:
+            for conv in self.get_conversations():
+                conv_id = conv.get("id")
+                conv_jsonl.write(json.dumps(conv, ensure_ascii=False) + "\n")
+                conv_rows.append({
+                    "conversation_id": conv_id,
+                    "updated_time": iso8601(conv.get("updated_time")),
+                    "link": conv.get("link"),
+                    "participants": ", ".join(
+                        [p.get("name") for p in (conv.get("participants", {}).get("data", []))]
+                    ),
+                })
+                # Nachrichten innerhalb der Konversation
+                for msg in self.get_messages(conv_id):
+                    msg_jsonl.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                    msg_rows.append({
+                        "conversation_id": conv_id,
+                        "message_id": msg.get("id"),
+                        "created_time": iso8601(msg.get("created_time")),
+                        "from": (msg.get("from") or {}).get("name"),
+                        "to": ", ".join([t.get("name") for t in msg.get("to", {}).get("data", [])]) if msg.get("to") else None,
+                        "message": (msg.get("message") or "").replace("\n", " ").strip(),
+                    })
+        except Exception as e:
+            self.append_sources_manifest(f"WARN conversations/messages: {e}")
+
+        conv_jsonl.close()
+        msg_jsonl.close()
+
+        if conv_rows:
+            pd.DataFrame(conv_rows).to_csv(self.path("data", "conversations.csv"), index=False)
+        if msg_rows:
+            pd.DataFrame(msg_rows).to_csv(self.path("data", "messages.csv"), index=False)
+
 
         # CSV schreiben
         if posts_rows:
