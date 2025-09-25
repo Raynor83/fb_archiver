@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Facebook-Archiv Viewer</title>
+  <style>
+    :root {
+  --bg:#f0f2f5;
+  --panel:#ffffff;
+  --card:#ffffff;
+  --muted:#65676b;
+  --text:#050505;
+  --accent:#1877f2; /* Facebook Blau */
+  --accent2:#42b72a; /* Messenger/Grün */
+}
+    html, body { height: 100%; }
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; background:var(--bg); color:var(--text); line-height:1.5;}    
+    .container{ max-width:1200px; margin:20px auto; padding:0 16px; }
+    header{ display:flex; gap:16px; align-items:center; justify-content:space-between; margin-bottom:16px; background:var(--accent); color:#fff; padding:10px 16px; border-radius:8px; }
+    h1{ font-size:clamp(20px,2.8vw,28px); margin:0; letter-spacing:.3px; color:white; }
+    .bar{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    button, .btn { background:var(--accent); border:0; color:#fff; font-weight:600; padding:10px 14px; border-radius:6px; cursor:pointer; box-shadow: 0 2px 6px rgba(0,0,0,.2); transition: background .2s; } button:hover, .btn:hover{ background:#166fe5; }
+    button.ghost { background:#ffffff; color:var(--text); border:1px solid #1f2937; box-shadow:none; }
+    button.small { padding:6px 10px; font-size: 12px; }
+    input[type="text"], input[type="date"], select { background:#ffffff; color:var(--text); border:1px solid #1f2937; padding:10px 12px; border-radius:10px; }
+    input[type="file"]{ color:var(--muted); }
+    .tabs{ display:flex; gap:6px; flex-wrap:wrap; margin:16px 0; }
+    .tab{ padding:10px 12px; border-radius:6px; background:#f0f2f5; border:1px solid transparent; color:var(--muted); cursor:pointer; font-weight:500; } .tab:hover{ background:#e7f3ff; color:var(--accent);}
+    .tab.active{ color:var(--accent); border-bottom:3px solid var(--accent); background:#fff; }
+    .panel{ background:var(--panel); border:1px solid #dddfe2; border-radius:8px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.1); }
+    .cards{ display:grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+    .card{ background:var(--card); border:1px solid #dddfe2; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+    .muted{ color:var(--muted); font-size:12px; }
+    .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .pill{ font-size:11px; padding:4px 8px; border-radius:999px; border:1px solid #1f2937; color:var(--muted); }
+    table{ width:100%; border-collapse:collapse; }
+    th, td{ text-align:left; padding:10px; border-bottom:1px solid #1f2937; vertical-align:top; }
+    th{ position:sticky; top:0; background:#f0f2f5; z-index:1; }
+    .table-wrap{ max-height:65vh; overflow:auto; border-radius:12px; border:1px solid #1f2937; }
+    .statbar{ display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin-bottom:12px; }
+    .stat{ background:#fff; border:1px solid #dddfe2; border-radius:8px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+    .stat .n{ font-size:20px; font-weight:700; }
+    .kicker{ font-size:12px; color:var(--muted); }
+    .footer{ margin:18px 0 8px; color:var(--muted); font-size:12px; display:flex; gap:12px; align-items:center; justify-content:space-between; background:#f0f2f5; padding:8px; border-radius:8px; }
+    .gallery{ display:grid; grid-template-columns: repeat(auto-fill,minmax(160px,1fr)); gap:10px; }
+    .thumb{ background:#fff; border:1px solid #dddfe2; border-radius:8px; padding:6px; }
+    .thumb img, .thumb video{ width:100%; height:120px; object-fit:cover; border-radius:6px; background:#f0f2f5; }
+    .dropzone{ border:2px dashed #ccd0d5; border-radius:8px; padding:14px; text-align:center; color:var(--muted); background:#f5f6f7; }
+    @media (max-width: 960px){ .grid{ grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1 style="display:flex;align-items:center;gap:8px;"><span style="background:#fff;color:#1877f2;border-radius:4px;padding:2px 6px;font-weight:700;">f</span> Archiv Viewer</h1>
+      <div class="bar">
+        <button id="pickDir">Ordner auswählen</button>
+        <label class="btn" for="fileInput">Dateien laden</label>
+        <input id="fileInput" type="file" multiple hidden accept=".jsonl,.txt,.csv,.json,.jpg,.jpeg,.png,.mp4,.webm" />
+        <button class="ghost" id="exportFiltered">Gefiltertes als CSV exportieren</button>
+      </div>
+    </header>
+
+    <div class="panel" style="margin-bottom:12px">
+      <div class="row" style="justify-content:space-between; gap:12px;">
+        <div class="row">
+          <input id="q" type="text" placeholder="Suche (Text, Autor, URL, ID)" style="min-width:280px;">
+          <label>von <input id="from" type="date"></label>
+          <label>bis <input id="to" type="date"></label>
+          <select id="scope">
+            <option value="posts">Posts</option>
+            <option value="comments">Kommentare</option>
+            <option value="conversations">Konversationen</option>
+            <option value="messages">Nachrichten</option>
+          </select>
+          <button class="ghost small" id="resetFilters">Zurücksetzen</button>
+        </div>
+        <div class="row">
+          <span class="pill" id="pageInfo">Seite: –</span>
+          <span class="pill" id="dateInfo">Zeitraum: –</span>
+          <span class="pill" id="counts">0 Einträge</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <div class="tab active" data-tab="posts">Posts</div>
+      <div class="tab" data-tab="comments">Kommentare</div>
+      <div class="tab" data-tab="conversations">Konversationen</div>
+      <div class="tab" data-tab="messages">Nachrichten</div>
+      <div class="tab" data-tab="media">Medien</div>
+      <div class="tab" data-tab="manifests">Manifeste</div>
+    </div>
+
+    <div id="content">
+      <section data-panel="posts" class="panel">
+        <div class="statbar">
+          <div class="stat"><div class="kicker">Anzahl Posts</div><div class="n" id="statPosts">0</div></div>
+          <div class="stat"><div class="kicker">Kommentare (gesamt)</div><div class="n" id="statComments">0</div></div>
+          <div class="stat"><div class="kicker">Reaktionen (Summe)</div><div class="n" id="statReacts">0</div></div>
+          <div class="stat"><div class="kicker">Zeitraum</div><div class="n" id="statRange">–</div></div>
+        </div>
+        <div class="table-wrap"><table id="tblPosts"><thead><tr>
+          <th>Datum</th><th>Post‑ID</th><th>Text</th><th>Reaktionen</th><th>Shares</th><th>Permalink</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section data-panel="comments" class="panel" hidden>
+        <div class="table-wrap"><table id="tblComments"><thead><tr>
+          <th>Datum</th><th>Post‑ID</th><th>Kommentar‑ID</th><th>Autor</th><th>Likes</th><th>Ebene</th><th>Text</th><th>Permalink</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section data-panel="conversations" class="panel" hidden>
+        <div class="table-wrap"><table id="tblConversations"><thead><tr>
+          <th>Aktualisiert</th><th>Konv‑ID</th><th>Teilnehmer</th><th>Link</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section data-panel="messages" class="panel" hidden>
+        <div class="table-wrap"><table id="tblMessages"><thead><tr>
+          <th>Datum</th><th>Konv‑ID</th><th>Msg‑ID</th><th>Von</th><th>An</th><th>Text</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section data-panel="media" class="panel" hidden>
+        <p class="muted">Bilder/Videos werden aus <code>media/images</code>, <code>media/videos</code> sowie Mappings aus <code>manifests/sources.txt</code> gelesen.</p>
+        <div class="gallery" id="gallery"></div>
+      </section>
+
+      <section data-panel="manifests" class="panel" hidden>
+        <div class="row" style="justify-content:space-between">
+          <div class="muted">Manifeste &amp; Logs</div>
+          <button class="ghost small" id="reloadManifests">Neu laden</button>
+        </div>
+        <div class="cards" id="manifests"></div>
+      </section>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <div class="dropzone" id="dropzone">Optional: Dateien hierher ziehen (z. B. <code>data/posts.jsonl</code>, <code>data/comments.jsonl</code>, <code>manifests/sources.txt</code> …)</div>
+      <div class="footer"><span>Offline & lokal – funktioniert am besten in Chromium‑Browsern mit Ordnerzugriff.</span><span>© fb_archiver Viewer</span></div>
+    </div>
+  </div>
+
+<script>
+// --- Mini‑Utils ---
+const $$ = sel => document.querySelector(sel);
+const $$$ = sel => Array.from(document.querySelectorAll(sel));
+const fmtDate = s => s ? new Date(s).toLocaleString() : '';
+const escapeHtml = s => (s+'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#039;'}[c]));
+const csv = rows => rows.map(r=>r.map(x=>{
+  if(x==null) return '';
+  let s = String(x);
+  if(/[",\n]/.test(s)) s='"'+s.replace(/"/g,'""')+'"';
+  return s;
+}).join(',')).join('\n');
+
+// State
+const state = {
+  dir: null,
+  files: new Map(), // key: relative path, value: File
+  data: { posts: [], comments: [], conversations: [], messages: [] },
+  mediaMap: new Map(), // post_id -> [paths]
+  pageInfo: { name: '–', id: '–', link: null },
+  dateRange: { from:null, to:null },
+};
+
+// Tabs
+$$$('.tab').forEach(t => t.addEventListener('click', () => {
+  $$$('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  const id=t.dataset.tab;
+  $$$('[data-panel]').forEach(p=>p.hidden = p.dataset.panel!==id);
+  $$('#scope').value = id;
+  render();
+}));
+
+// Folder picker (File System Access API)
+$$('#pickDir').addEventListener('click', async ()=>{
+  try{
+    const dir = await window.showDirectoryPicker();
+    state.dir = dir;
+    await loadFromDirectory(dir);
+    notify('Ordner geladen');
+  }catch(e){ if(e&&e.name!=='AbortError') alert('Fehler: '+e.message); }
+});
+
+// File input (drag/drop or picker)
+$$('#fileInput').addEventListener('change', e => ingestFiles(e.target.files));
+$$('#dropzone').addEventListener('dragover', e=>{ e.preventDefault(); e.dataTransfer.dropEffect='copy'; });
+$$('#dropzone').addEventListener('drop', e=>{ e.preventDefault(); ingestFiles(e.dataTransfer.files); });
+
+$$('#resetFilters').addEventListener('click', ()=>{ 
+  $$(`#q`).value=''; $$(`#from`).value=''; $$(`#to`).value=''; render(); 
+});
+$$('#scope').addEventListener('change', ()=>{ selectTab($$('#scope').value); render(); });
+$$('#q').addEventListener('input', render);
+$$('#from').addEventListener('change', render);
+$$('#to').addEventListener('change', render);
+
+$$('#exportFiltered').addEventListener('click', ()=>{
+  const scope = $$('#scope').value;
+  const rows = getFiltered(scope).map(r=>Object.assign({}, r));
+  if(!rows.length) return alert('Keine Daten im Filterbereich.');
+  const headers = Object.keys(rows[0]);
+  const arr = [headers].concat(rows.map(r=>headers.map(h=>r[h])));
+  const blob = new Blob([csv(arr)], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `export_${scope}.csv`;
+  a.click();
+});
+
+$$('#reloadManifests').addEventListener('click', renderManifests);
+
+function notify(msg){ console.log(msg); }
+
+function selectTab(id){ $$$('.tab').forEach(x=>{ x.classList.toggle('active', x.dataset.tab===id); }); $$$('[data-panel]').forEach(p=>p.hidden = p.dataset.panel!==id); }
+
+async function loadFromDirectory(dir){
+  state.files.clear();
+  state.mediaMap.clear();
+  // Try standard files
+  await addFileIfExists('README.txt');
+  await addFileIfExists('data/posts.jsonl');
+  await addFileIfExists('data/comments.jsonl');
+  await addFileIfExists('data/conversations.jsonl');
+  await addFileIfExists('data/messages.jsonl');
+  await addFileIfExists('manifests/sources.txt');
+  // media directories (list entries)
+  await addMediaDir('media/images');
+  await addMediaDir('media/videos');
+
+  await parseAll();
+  render();
+  renderManifests();
+  await buildMediaMap();
+  await renderMediaGallery();
+}
+
+async function addMediaDir(path){
+  try{
+    const h = await getHandle(path);
+    if(!h) return;
+    for await (const ent of h.values()){
+      if(ent.kind==='file'){
+        const f = await ent.getFile();
+        state.files.set(`${path}/${ent.name}`, f);
+      }
+    }
+  }catch{ /* ignore */ }
+}
+
+async function getHandle(path){
+  try{
+    const parts = path.split('/');
+    let cur = state.dir;
+    for(const p of parts){ cur = await cur.getDirectoryHandle(p); }
+    return cur;
+  }catch{ return null; }
+}
+
+async function addFileIfExists(path){
+  try{
+    let fileHandle = await state.dir;
+    for(const seg of path.split('/')){
+      if(seg==='') continue;
+      try{
+        if(seg.includes('.')){ fileHandle = await fileHandle.getFileHandle(seg); }
+        else { fileHandle = await fileHandle.getDirectoryHandle(seg); }
+      }catch{ return; }
+    }
+    if(fileHandle && fileHandle.getFile){
+      const file = await fileHandle.getFile();
+      state.files.set(path, file);
+    }
+  }catch{ /* ignore */ }
+}
+
+function ingestFiles(fileList){
+  for(const f of fileList){ state.files.set(f.name, f); }
+  parseAll().then(()=>{ render(); renderManifests(); renderMediaGallery(); });
+}
+
+async function parseAll(){
+  for(const [path,file] of state.files){
+    if(/posts\.jsonl$/.test(path)) state.data.posts = await readJSONL(file);
+    else if(/comments\.jsonl$/.test(path)) state.data.comments = await readJSONL(file);
+    else if(/conversations\.jsonl$/.test(path)) state.data.conversations = await readJSONL(file);
+    else if(/messages\.jsonl$/.test(path)) state.data.messages = await readJSONL(file);
+    else if(/README\.txt$/.test(path)) {
+      const txt = await file.text();
+      const mName = /Seite:\s*(.+?)\s*\(ID:/m.exec(txt); if(mName) state.pageInfo.name = mName[1].trim();
+      const mId = /ID:\s*([0-9]+)/.exec(txt); if(mId) state.pageInfo.id = mId[1];
+      const mLink = /Link:\s*(\S+)/.exec(txt); if(mLink) state.pageInfo.link = mLink[1];
+      const mSince = /since=([^\s]+)/.exec(txt); const mUntil = /until=([^\s]+)/.exec(txt);
+      state.dateRange.from = mSince ? mSince[1] : null; state.dateRange.to = mUntil ? mUntil[1] : null;
+    }
+  }
+  updateHeaderInfo();
+}
+
+function updateHeaderInfo(){
+  $$('#pageInfo').textContent = `Seite: ${state.pageInfo.name} (ID ${state.pageInfo.id})`;
+  $$('#dateInfo').textContent = `Zeitraum: ${state.dateRange.from||'–'} bis ${state.dateRange.to||'–'}`;
+  $$('#statPosts').textContent = state.data.posts.length;
+  $$('#statComments').textContent = state.data.comments.length;
+  const reacts = state.data.posts.reduce((a,b)=>a+ (Number(b.reactions?.summary?.total_count||b.reactions_total||0)||0),0);
+  $$('#statReacts').textContent = reacts;
+  const dates = state.data.posts.map(p=>new Date(p.created_time||p.createdTime||p.created||p.created_at||0)).filter(d=>d>0).sort((a,b)=>a-b);
+  $$('#statRange').textContent = dates.length? `${dates[0].toLocaleDateString()} – ${dates[dates.length-1].toLocaleDateString()}` : '–';
+}
+
+async function readJSONL(file){
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  const arr = [];
+  for(const line of lines){
+    try{ arr.push(JSON.parse(line)); }catch{ /* skip */ }
+  }
+  return arr;
+}
+
+function getFiltered(scope){
+  const qv = ($$('#q').value||'').toLowerCase();
+  const f = $$('#from').value? new Date($$('#from').value) : null;
+  const t = $$('#to').value? new Date($$('#to').value+'T23:59:59') : null;
+  let rows = [];
+  if(scope==='posts'){
+    rows = state.data.posts.map(p=>({
+      created_time: p.created_time||p.created_time_iso||p.created_at||p.created,
+      post_id: p.id||p.post_id,
+      message: p.message||p.story||'',
+      reactions_total: p.reactions_total ?? (p.reactions?.summary?.total_count),
+      shares_count: p.shares_count ?? (p.shares?.count),
+      permalink_url: p.permalink_url||p.link||''
+    }));
+  } else if(scope==='comments'){
+    rows = state.data.comments.map(c=>({
+      created_time: c.created_time,
+      post_id: c.post_id || (c.parent?.id),
+      comment_id: c.id,
+      author_name: c.from?.name,
+      like_count: c.like_count ?? 0,
+      depth: c.depth ?? 0,
+      message: c.message || '',
+      permalink_url: c.permalink_url || ''
+    }));
+  } else if(scope==='conversations'){
+    rows = state.data.conversations.map(k=>({
+      updated_time: k.updated_time,
+      conversation_id: k.id,
+      participants: (k.participants?.data||[]).map(p=>p.name).join(', '),
+      link: k.link||''
+    }));
+  } else if(scope==='messages'){
+    rows = state.data.messages.map(m=>({
+      created_time: m.created_time,
+      conversation_id: m.conversation_id || '',
+      message_id: m.id,
+      from: m.from?.name||'',
+      to: (m.to?.data||[]).map(x=>x.name).join(', '),
+      message: m.message||''
+    }));
+  }
+
+  // text filter
+  if(qv){
+    rows = rows.filter(r=> Object.values(r).some(v=> (v!=null && (''+v).toLowerCase().includes(qv))));
+  }
+  // date filter
+  const dateKey = scope==='conversations' ? 'updated_time' : 'created_time';
+  rows = rows.filter(r=>{
+    const d = r[dateKey] ? new Date(r[dateKey]) : null;
+    if(!d) return true;
+    if(f && d < f) return false;
+    if(t && d > t) return false;
+    return true;
+  });
+  $$('#counts').textContent = `${rows.length} Einträge`;
+  return rows;
+}
+
+function render(){
+  const scope = $$('#scope').value;
+  if(scope==='posts') renderPosts();
+  else if(scope==='comments') renderComments();
+  else if(scope==='conversations') renderConversations();
+  else if(scope==='messages') renderMessages();
+}
+
+function renderPosts(){
+  const tbody = $$('#tblPosts tbody'); tbody.innerHTML='';
+  for(const p of getFiltered('posts').slice(0, 5000)){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(fmtDate(p.created_time))}</td>
+      <td><code>${escapeHtml(p.post_id)}</code></td>
+      <td>${escapeHtml(p.message||'')}</td>
+      <td>${p.reactions_total??''}</td>
+      <td>${p.shares_count??''}</td>
+      <td>${p.permalink_url? `<a target="_blank" href="${escapeHtml(p.permalink_url)}">Link</a>`:''}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderComments(){
+  const tbody = $$('#tblComments tbody'); tbody.innerHTML='';
+  for(const c of getFiltered('comments').slice(0, 5000)){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(fmtDate(c.created_time))}</td>
+      <td><code>${escapeHtml(c.post_id||'')}</code></td>
+      <td><code>${escapeHtml(c.comment_id||'')}</code></td>
+      <td>${escapeHtml(c.author_name||'')}</td>
+      <td>${c.like_count??''}</td>
+      <td>${c.depth??''}</td>
+      <td>${escapeHtml(c.message||'')}</td>
+      <td>${c.permalink_url? `<a target="_blank" href="${escapeHtml(c.permalink_url)}">Link</a>`:''}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderConversations(){
+  const tbody = $$('#tblConversations tbody'); tbody.innerHTML='';
+  for(const k of getFiltered('conversations').slice(0, 5000)){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(fmtDate(k.updated_time))}</td>
+      <td><code>${escapeHtml(k.conversation_id||'')}</code></td>
+      <td>${escapeHtml(k.participants||'')}</td>
+      <td>${k.link? `<a target="_blank" href="${escapeHtml(k.link)}">Link</a>`:''}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderMessages(){
+  const tbody = $$('#tblMessages tbody'); tbody.innerHTML='';
+  for(const m of getFiltered('messages').slice(0, 5000)){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(fmtDate(m.created_time))}</td>
+      <td><code>${escapeHtml(m.conversation_id||'')}</code></td>
+      <td><code>${escapeHtml(m.message_id||'')}</code></td>
+      <td>${escapeHtml(m.from||'')}</td>
+      <td>${escapeHtml(m.to||'')}</td>
+      <td>${escapeHtml(m.message||'')}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+async function buildMediaMap(){
+  // Parse manifests/sources.txt for MEDIA lines
+  const mf = [...state.files.entries()].find(([p])=>/manifests\/sources\.txt$/.test(p));
+  if(!mf) return; const [, file] = mf; const txt = await file.text();
+  const lines = txt.split(/\r?\n/);
+  for(const line of lines){
+    const m = /^MEDIA\s+(\d+_?\d*)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
+    if(m){
+      const postId = m[1]; const local = m[2];
+      if(!state.mediaMap.has(postId)) state.mediaMap.set(postId, []);
+      state.mediaMap.get(postId).push(local);
+    }
+  }
+}
+
+async function renderMediaGallery(){
+  const wrap = $$('#gallery'); wrap.innerHTML='';
+  // Prefer files from media/* dirs
+  const mediaEntries = [...state.files.entries()].filter(([p])=>/media\/(images|videos)\//.test(p));
+  if(!mediaEntries.length){ wrap.innerHTML = '<div class="muted">Keine Mediendateien gefunden.</div>'; return; }
+  for(const [path,file] of mediaEntries){
+    const url = URL.createObjectURL(file);
+    const isVideo = /\.(mp4|webm)$/i.test(path);
+    const el = document.createElement('div'); el.className='thumb';
+    el.innerHTML = isVideo ? `<video src="${url}" controls muted></video>` : `<img src="${url}" alt="${escapeHtml(path)}"/>`;
+    const meta = document.createElement('div'); meta.className='muted'; meta.style.marginTop='6px';
+    meta.innerHTML = `<code>${escapeHtml(path.split('/').slice(-1)[0])}</code>`;
+    el.appendChild(meta);
+    wrap.appendChild(el);
+  }
+}
+
+async function renderManifests(){
+  const list = $$('#manifests'); list.innerHTML='';
+  // checksums
+  const chk = [...state.files.entries()].find(([p])=>/manifests\/checksums\.sha256$/.test(p));
+  if(chk){ const txt = await chk[1].text(); list.appendChild(manifestCard('checksums.sha256', txt.slice(0, 5000))); }
+  const src = [...state.files.entries()].find(([p])=>/manifests\/sources\.txt$/.test(p));
+  if(src){ const txt = await src[1].text(); list.appendChild(manifestCard('sources.txt', txt.slice(0, 500000))); }
+  const readme = [...state.files.entries()].find(([p])=>/README\.txt$/.test(p));
+  if(readme){ const txt = await readme[1].text(); list.appendChild(manifestCard('README.txt', txt)); }
+}
+
+function manifestCard(title, content){
+  const card = document.createElement('div'); card.className='card';
+  card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <strong>${escapeHtml(title)}</strong>
+      <button class="ghost small">Kopieren</button>
+    </div>
+    <pre style="white-space:pre-wrap; max-height:300px; overflow:auto; margin:0">${escapeHtml(content)}</pre>`;
+  card.querySelector('button').addEventListener('click', ()=>{
+    navigator.clipboard.writeText(content);
+    card.querySelector('button').textContent='✓ Kopiert';
+    setTimeout(()=>card.querySelector('button').textContent='Kopieren', 1500);
+  });
+  return card;
+}
+
+// Initialize
+render();
+</script>
+</body>
+</html>
