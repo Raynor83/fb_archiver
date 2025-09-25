@@ -244,48 +244,8 @@ class FacebookArchiver:
             if not next_url:
                 break
 
-    def get_conversations(self) -> Iterable[Dict]:
-        """Liefert alle Inbox-Konversationen der Seite zurück."""
-        endpoint = f"{self.page_info.id}/conversations"
-        params = {"fields": "id,updated_time,link,participants"}
-        next_url = None
-        while True:
-            if next_url:
-                r = self.session.get(next_url, timeout=60)
-                if r.status_code != 200:
-                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                data = r.json()
-            else:
-                data = self.graph_get(endpoint, params)
-            for conv in data.get("data", []):
-                yield conv
-            paging = data.get("paging", {})
-            next_url = paging.get("next")
-            if not next_url:
-                break
-
-    def get_messages(self, conversation_id: str) -> Iterable[Dict]:
-        """Liefert alle Nachrichten einer Konversation."""
-        endpoint = f"{conversation_id}/messages"
-        params = {"fields": "id,from,to,message,created_time,attachments"}
-        next_url = None
-        while True:
-            if next_url:
-                r = self.session.get(next_url, timeout=60)
-                if r.status_code != 200:
-                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                data = r.json()
-            else:
-                data = self.graph_get(endpoint, params)
-            for msg in data.get("data", []):
-                yield msg
-            paging = data.get("paging", {})
-            next_url = paging.get("next")
-            if not next_url:
-                break
-
     def download_media_from_post(self, post: Dict) -> List[Tuple[str, str]]:
-        """Gibt Liste (local_path, source_url) zurück für gespeicherte Dateien."""
+        """Gibt Liste (local_path, source_url) zurÃ¼ck fÃ¼r gespeicherte Dateien."""
         saved: List[Tuple[str, str]] = []
         atts = (post.get("attachments") or {}).get("data") or []
         for a in atts:
