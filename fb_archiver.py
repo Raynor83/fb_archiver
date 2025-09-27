@@ -80,7 +80,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import requests
@@ -105,7 +105,7 @@ except Exception:
             try:
                 return _dt.datetime.fromisoformat(s)  # Python 3.11: robust
             except Exception:
-                return _dt.datetime.utcnow()
+                return _dt.datetime.now(timezone.utc)
 
     dtparse = _FallbackParser()
 
@@ -429,7 +429,7 @@ class FacebookArchiver:
 
     def write_readme(self):
         pi = self.page_info
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).isoformat() + "Z"
         txt = f"""
 Facebook Archiv – erzeugt mit fb_archiver.py
 Seite: {pi.name} (ID: {pi.id})
@@ -676,7 +676,7 @@ def run_split_by_years(args):
     page_info = base_arch.get_page_info()
     first_date = detect_first_post_date(args.page, args.access_token)
     start_year = int(first_date.split("-")[0])
-    end_year = datetime.datetime.utcnow().year
+    end_year = datetime.datetime.now(timezone.utc).year
     print(f"[INFO] Archivierung von {start_year} bis {end_year} für {page_info.name}")
 
     for year in range(start_year, end_year + 1):
