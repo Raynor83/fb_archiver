@@ -1,25 +1,3 @@
-
-def detect_first_post_date(page: str, token: str) -> str:
-    """Fragt das erste Post-Datum einer Seite ab."""
-    import requests
-    GRAPH = "https://graph.facebook.com/v19.0"
-    url = f"{GRAPH}/{page}/posts"
-    params = {
-        "access_token": token,
-        "fields": "created_time",
-        "limit": 1,
-        "until": "2012-01-01"  # sicherstellen, dass auch ältere Posts berücksichtigt werden
-    }
-    r = requests.get(url, params=params, timeout=60)
-    if r.status_code == 200:
-        data = r.json().get("data", [])
-        if data:
-            return data[-1]["created_time"].split("T")[0]
-    # Fallback: 2010-01-01
-    return "2010-01-01"
-
-
-#!/usr/bin/env python3
 """
 fb_archiver.py — Graph-API-basiertes Facebook-Archiv-Tool für Seiten (Pages)
 
@@ -70,6 +48,48 @@ DSGVO-HINWEIS
 - Kommentare und Nachrichten enthalten personenbezogene Daten:
   Zugriff im Archiv ggf. mit Sperrfristen regeln.
 """
+
+def detect_first_post_date(page: str, token: str) -> str:
+    """Ermittelt das älteste Post-Datum einer Seite (Paging, ohne until, ohne ID)."""
+    import requests
+    GRAPH = "https://graph.facebook.com/v19.0"
+    url = f"{GRAPH}/{page}/posts"
+    params = {
+        "access_token": token,
+        "fields": "created_time",
+        "limit": 100
+    }
+
+    oldest = None
+    page_count = 0
+    while True:
+        r = requests.get(url, params=params, timeout=60)
+        if r.status_code != 200:
+            print(f"[WARN] Fehler bei detect_first_post_date: {r.status_code} {r.text}")
+            break
+
+        data = r.json()
+        posts = data.get("data", [])
+        if not posts:
+            break
+
+        page_count += 1
+        last_date = posts[-1]["created_time"].split("T")[0]
+        oldest = last_date
+        print(f"[DEBUG] Seite {page_count}: ältestes bisher {oldest}")
+
+        paging = data.get("paging", {})
+        if "next" in paging:
+            url = paging["next"]
+            params = {}  # "next" enthält alles Nötige
+        else:
+            break
+
+    print(f"[INFO] Ältestes gefundenes Datum: {oldest or '2010-01-01'}")
+    return oldest or "2010-01-01"
+
+
+#!/usr/bin/env python3
 
 
 import argparse
@@ -653,7 +673,7 @@ Hinweise:
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Facebook Page Archiv (Graph API)")
     ap.add_argument(
-        "--page", required=True, help="Seitenname oder ID (z.B. StadtMannheim)"
+        "--page", required=True, help="Seitenname, ID oder URL (z.B. https://www.facebook.com/StadtMannheim)"
     )
     ap.add_argument(
         "--access-token",
@@ -672,7 +692,17 @@ def parse_args() -> argparse.Namespace:
         default=100,
         help="API-Seitenlimit pro Anfrage (Standard 100)",
     )
-    return ap.parse_args()
+    args = ap.parse_args()
+
+    # Falls eine vollständige URL übergeben wurde -> Seitennamen extrahieren
+    if args.page.startswith("http://") or args.page.startswith("https://"):
+        m = re.search(r"facebook\.com/([^/?#]+)", args.page)
+        if m:
+            print(f"[INFO] Extrahiere Seitennamen aus URL: {m.group(1)}")
+            args.page = m.group(1)
+
+    return args
+
 
 
 
