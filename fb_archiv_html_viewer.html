@@ -219,19 +219,36 @@ function notify(msg){ console.log(msg); }
 
 function selectTab(id){ $$$('.tab').forEach(x=>{ x.classList.toggle('active', x.dataset.tab===id); }); $$$('[data-panel]').forEach(p=>p.hidden = p.dataset.panel!==id); }
 
-async function loadFromDirectory(dir){
+async function loadFromDirectory(){
+
   state.files.clear();
   state.mediaMap.clear();
-  // Try standard files
+  // Root files
   await addFileIfExists('README.txt');
   await addFileIfExists('data/posts.jsonl');
   await addFileIfExists('data/comments.jsonl');
   await addFileIfExists('data/conversations.jsonl');
   await addFileIfExists('data/messages.jsonl');
   await addFileIfExists('manifests/sources.txt');
-  // media directories (list entries)
   await addMediaDir('media/images');
   await addMediaDir('media/videos');
+
+  // Additionally scan immediate subdirectories (e.g., year folders)
+  try{
+    for await (const entry of state.dir.values()){
+      if(entry.kind==='directory'){
+        const sub = entry.name;
+        await addFileIfExists(`${sub}/README.txt`);
+        await addFileIfExists(`${sub}/data/posts.jsonl`);
+        await addFileIfExists(`${sub}/data/comments.jsonl`);
+        await addFileIfExists(`${sub}/data/conversations.jsonl`);
+        await addFileIfExists(`${sub}/data/messages.jsonl`);
+        await addFileIfExists(`${sub}/manifests/sources.txt`);
+        await addMediaDir(`${sub}/media/images`);
+        await addMediaDir(`${sub}/media/videos`);
+      }
+    }
+  }catch(e){ console.warn('Subdir scan failed', e); }
 
   await parseAll();
   render();
@@ -285,18 +302,40 @@ function ingestFiles(fileList){
 }
 
 async function parseAll(){
+
+  // reset accumulators
+  state.data.posts = [];
+  state.data.comments = [];
+  state.data.conversations = [];
+  state.data.messages = [];
+  // aggregate across all loaded files
   for(const [path,file] of state.files){
-    if(/posts\.jsonl$/.test(path)) state.data.posts = await readJSONL(file);
-    else if(/comments\.jsonl$/.test(path)) state.data.comments = await readJSONL(file);
-    else if(/conversations\.jsonl$/.test(path)) state.data.conversations = await readJSONL(file);
-    else if(/messages\.jsonl$/.test(path)) state.data.messages = await readJSONL(file);
-    else if(/README\.txt$/.test(path)) {
+    if(/posts\.jsonl$/.test(path)){
+      const arr = await readJSONL(file);
+      state.data.posts = state.data.posts.concat(arr);
+    } else if(/comments\.jsonl$/.test(path)){
+      const arr = await readJSONL(file);
+      state.data.comments = state.data.comments.concat(arr);
+    } else if(/conversations\.jsonl$/.test(path)){
+      const arr = await readJSONL(file);
+      state.data.conversations = state.data.conversations.concat(arr);
+    } else if(/messages\.jsonl$/.test(path)){
+      const arr = await readJSONL(file);
+      state.data.messages = state.data.messages.concat(arr);
+    } else if(/README\.txt$/.test(path)) {
       const txt = await file.text();
-      const mName = /Seite:\s*(.+?)\s*\(ID:/m.exec(txt); if(mName) state.pageInfo.name = mName[1].trim();
-      const mId = /ID:\s*([0-9]+)/.exec(txt); if(mId) state.pageInfo.id = mId[1];
-      const mLink = /Link:\s*(\S+)/.exec(txt); if(mLink) state.pageInfo.link = mLink[1];
-      const mSince = /since=([^\s]+)/.exec(txt); const mUntil = /until=([^\s]+)/.exec(txt);
-      state.dateRange.from = mSince ? mSince[1] : null; state.dateRange.to = mUntil ? mUntil[1] : null;
+      // Set pageInfo only once (from the first README found)
+      if(state.pageInfo.name==='–'){
+        const mName = /Seite:\s*(.+?)\s*\(ID:/m.exec(txt); if(mName) state.pageInfo.name = mName[1].trim();
+        const mId = /ID:\s*([0-9]+)/.exec(txt); if(mId) state.pageInfo.id = mId[1];
+        const mLink = /Link:\s*(\S+)/.exec(txt); if(mLink) state.pageInfo.link = mLink[1];
+      }
+      const mSince = /since=([^\s]+)/.exec(txt);
+      const mUntil = /until=([^\s]+)/.exec(txt);
+      const s = mSince ? mSince[1] : null;
+      const u = mUntil ? mUntil[1] : null;
+      if(s){ if(!state.dateRange.from || s < state.dateRange.from) state.dateRange.from = s; }
+      if(u){ if(!state.dateRange.to || u > state.dateRange.to) state.dateRange.to = u; }
     }
   }
   updateHeaderInfo();
@@ -396,7 +435,7 @@ function renderPosts(){
   for(const p of getFiltered('posts').slice(0, 5000)){
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${escapeHtml(fmtDate(p.created_time))}</td>
+      <td data-ts="${escapeHtml(p.created_time||'')}">${escapeHtml(fmtDate(p.created_time))}</td>
       <td><code>${escapeHtml(p.post_id)}</code></td>
       <td>${escapeHtml(p.message||'')}</td>
       <td>${p.reactions_total??''}</td>
@@ -411,7 +450,7 @@ function renderComments(){
   for(const c of getFiltered('comments').slice(0, 5000)){
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${escapeHtml(fmtDate(c.created_time))}</td>
+      <td data-ts="${escapeHtml(c.created_time||'')}">${escapeHtml(fmtDate(c.created_time))}</td>
       <td><code>${escapeHtml(c.post_id||'')}</code></td>
       <td><code>${escapeHtml(c.comment_id||'')}</code></td>
       <td>${escapeHtml(c.author_name||'')}</td>
@@ -428,7 +467,7 @@ function renderConversations(){
   for(const k of getFiltered('conversations').slice(0, 5000)){
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${escapeHtml(fmtDate(k.updated_time))}</td>
+      <td data-ts="${escapeHtml(k.updated_time||'')}">${escapeHtml(fmtDate(k.updated_time))}</td>
       <td><code>${escapeHtml(k.conversation_id||'')}</code></td>
       <td>${escapeHtml(k.participants||'')}</td>
       <td>${k.link? `<a target="_blank" href="${escapeHtml(k.link)}">Link</a>`:''}</td>`;
@@ -441,7 +480,7 @@ function renderMessages(){
   for(const m of getFiltered('messages').slice(0, 5000)){
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${escapeHtml(fmtDate(m.created_time))}</td>
+      <td data-ts="${escapeHtml(m.created_time||'')}">${escapeHtml(fmtDate(m.created_time))}</td>
       <td><code>${escapeHtml(m.conversation_id||'')}</code></td>
       <td><code>${escapeHtml(m.message_id||'')}</code></td>
       <td>${escapeHtml(m.from||'')}</td>
@@ -511,6 +550,82 @@ function manifestCard(title, content){
 
 // Initialize
 render();
+
+// --- Tabellen-Sortierung ---
+function makeTablesSortable(){
+  document.querySelectorAll("table").forEach(table => {
+    const headers = table.querySelectorAll("th");
+    headers.forEach((th, idx) => {
+      th.style.cursor = "pointer";
+      th.addEventListener("click", () => {
+        const tbody = table.querySelector("tbody");
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+        const asc = !th.classList.contains("sorted-asc");
+
+        // Reset Klassen
+        headers.forEach(h => h.classList.remove("sorted-asc","sorted-desc"));
+        th.classList.add(asc ? "sorted-asc" : "sorted-desc");
+
+        // Datumsspalten präzise erkennen
+        const isDateCol = /^(datum|aktualisiert)$/i.test(th.innerText.trim());
+
+        const getVal = (row) => {
+          const td = row.children[idx];
+          const raw = td.innerText.trim();
+
+          if(isDateCol){
+            const ts = td.getAttribute("data-ts") || "";
+            const t = Date.parse(ts) || Date.parse(raw.replace(/\s+/g, " "));
+            return isNaN(t) ? -Infinity : t;
+          }
+          // Zahl erkennen (Reaktionen, Shares etc.); ansonsten String
+          const hasDigit = /[0-9]/.test(raw);
+          const num = parseFloat(raw.replace(/[^0-9.-]/g,""));
+          if(hasDigit && !isNaN(num)){
+            return num;
+          }
+          return raw.toLowerCase();
+        };
+
+        rows.sort((a,b) => {
+          const A = getVal(a);
+          const B = getVal(b);
+          const bothNum = (typeof A === "number" && typeof B === "number");
+          if(bothNum){
+            return asc ? A - B : B - A;
+          }
+          return asc ? String(A).localeCompare(String(B), "de") : String(B).localeCompare(String(A), "de");
+        });
+
+        rows.forEach(r => tbody.appendChild(r));
+      });
+    });
+  });
+}
+
+
+// Nach jedem Render erneut aktivieren
+const oldRender = render;
+render = function(){
+  oldRender();
+  makeTablesSortable();
+
+  // Standard: nach Datum/letztem Eintrag absteigend sortieren (nur 1x pro Tabelle)
+  document.querySelectorAll("table").forEach(table => {
+    if(table.dataset.autosorted) return;
+    table.dataset.autosorted = "1";
+
+    const headers = table.querySelectorAll("th");
+    headers.forEach((th, idx) => {
+      if(/^(datum|aktualisiert)$/i.test(th.innerText.trim())){
+        const ev = new Event("click");
+        th.dispatchEvent(ev); // asc
+        th.dispatchEvent(ev); // desc
+      }
+    });
+  });
+}
+
 </script>
 </body>
 </html>

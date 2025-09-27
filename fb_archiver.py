@@ -1,3 +1,24 @@
+
+def detect_first_post_date(page: str, token: str) -> str:
+    """Fragt das erste Post-Datum einer Seite ab."""
+    import requests
+    GRAPH = "https://graph.facebook.com/v19.0"
+    url = f"{GRAPH}/{page}/posts"
+    params = {
+        "access_token": token,
+        "fields": "created_time",
+        "limit": 1,
+        "until": "2012-01-01"  # sicherstellen, dass auch ältere Posts berücksichtigt werden
+    }
+    r = requests.get(url, params=params, timeout=60)
+    if r.status_code == 200:
+        data = r.json().get("data", [])
+        if data:
+            return data[-1]["created_time"].split("T")[0]
+    # Fallback: 2010-01-01
+    return "2010-01-01"
+
+
 #!/usr/bin/env python3
 """
 fb_archiver.py — Graph-API-basiertes Facebook-Archiv-Tool für Seiten (Pages)
@@ -186,16 +207,8 @@ class FacebookArchiver:
             "created_time",
             "message",
             "permalink_url",
-            "status_type",
-            "story",
-            "shares",
-            "is_published",
             "updated_time",
-            "from",
-            "to",
-            "with_tags",
-            "reactions.limit(0).summary(total_count)",
-            "attachments{media_type,media,target,unshimmed_url,url,description,title}",
+            "reactions.limit(0).summary(total_count)"
         ]
         params = {"fields": ",".join(fields), "limit": self.limit}
         if self.since:
@@ -241,6 +254,22 @@ class FacebookArchiver:
                 if not next_url:
                     break
 
+    
+    def get_post_details(self, post_id: str) -> Dict:
+        """Lädt Zusatzdetails zu einem einzelnen Post (z.B. attachments, story, shares)."""
+        fields = [
+            "status_type",
+            "story",
+            "shares",
+            "is_published",
+            "attachments{media_type,media,target,unshimmed_url,url,description,title}"
+        ]
+        try:
+            data = self.graph_get(post_id, {"fields": ",".join(fields)})
+            return data
+        except Exception as e:
+            self.append_sources_manifest(f"WARN details for {post_id}: {e}")
+            return {}
     def get_comments_for_post(
         self, post_or_comment_id: str, depth: int = 0, parent: Optional[str] = None
     ) -> Iterable[Dict]:
@@ -456,7 +485,7 @@ Hinweise:
             self.append_sources_manifest(f"SINCE={self.since}")
         if self.until:
             self.append_sources_manifest(f"UNTIL={self.until}")
-
+    
         # Dateien vorbereiten
         posts_jsonl = open(self.path("data", "posts.jsonl"), "w", encoding="utf-8")
         comments_jsonl = open(
@@ -464,7 +493,7 @@ Hinweise:
         )
         posts_rows: List[Dict] = []
         comments_rows: List[Dict] = []
-
+    
         # Posts iterieren
         for post in self.iter_posts():
             pid = post.get("id")
@@ -476,7 +505,7 @@ Hinweise:
                 "total_count"
             )
             shares = (post.get("shares") or {}).get("count")
-
+    
             posts_rows.append(
                 {
                     "post_id": pid,
@@ -488,8 +517,12 @@ Hinweise:
                     "shares_count": shares,
                 }
             )
+            details = self.get_post_details(pid)
+            post.update(details)
+            if posts_rows:
+                posts_rows[-1]["shares_count"] = (post.get("shares") or {}).get("count")
             posts_jsonl.write(json.dumps(post, ensure_ascii=False) + "\n")
-
+    
             # Kommentare (rekursiv inkl. Replies)
             try:
                 for c in self.get_comments_for_post(pid, depth=0, parent=None):
@@ -512,16 +545,16 @@ Hinweise:
                     comments_jsonl.write(json.dumps(c, ensure_ascii=False) + "\n")
             except Exception as e:
                 self.append_sources_manifest(f"WARN comments for {pid}: {e}")
-
+    
             # Medien (best effort)
             if self.media:
                 saved = self.download_media_from_post(post)
                 for local, src in saved:
                     self.append_sources_manifest(f"MEDIA {pid} {local} <- {src}")
-
+    
         posts_jsonl.close()
         comments_jsonl.close()
-
+    
         # Inbox-Konversationen archivieren
         conv_jsonl = open(
             self.path("data", "conversations.jsonl"), "w", encoding="utf-8"
@@ -529,7 +562,7 @@ Hinweise:
         msg_jsonl = open(self.path("data", "messages.jsonl"), "w", encoding="utf-8")
         conv_rows: List[Dict] = []
         msg_rows: List[Dict] = []
-
+    
         try:
             for conv in self.get_conversations():
                 conv_id = conv.get("id")
@@ -549,7 +582,6 @@ Hinweise:
                 )
                 # Nachrichten innerhalb der Konversation
                 for msg in self.get_messages(conv_id):
-                    msg['conversation_id'] = conv_id
                     msg_jsonl.write(json.dumps(msg, ensure_ascii=False) + "\n")
                     msg_rows.append(
                         {
@@ -574,10 +606,10 @@ Hinweise:
                     )
         except Exception as e:
             self.append_sources_manifest(f"WARN conversations/messages: {e}")
-
+    
         conv_jsonl.close()
         msg_jsonl.close()
-
+    
         if conv_rows:
             pd.DataFrame(conv_rows).to_csv(
                 self.path("data", "conversations.csv"), index=False
@@ -586,7 +618,7 @@ Hinweise:
             pd.DataFrame(msg_rows).to_csv(
                 self.path("data", "messages.csv"), index=False
             )
-
+    
         # CSV schreiben
         if posts_rows:
             pd.DataFrame(posts_rows).to_csv(self.path("data", "posts.csv"), index=False)
@@ -594,13 +626,13 @@ Hinweise:
             pd.DataFrame(comments_rows).to_csv(
                 self.path("data", "comments.csv"), index=False
             )
-
+    
         # Checksums
         self.write_checksums()
-
+    
         print(f"Fertig. Archiv unter: {self.outdir}")
-
-
+    
+    
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Facebook Page Archiv (Graph API)")
     ap.add_argument(
@@ -626,9 +658,13 @@ def parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    arch = FacebookArchiver(
+
+
+from pathlib import Path
+
+def run_split_by_years(args):
+    import datetime
+    base_arch = FacebookArchiver(
         page=args.page,
         access_token=args.access_token,
         outdir=args.out,
@@ -637,4 +673,32 @@ if __name__ == "__main__":
         media=not args.no_media,
         limit=args.limit,
     )
-    arch.run()
+    page_info = base_arch.get_page_info()
+    first_date = detect_first_post_date(args.page, args.access_token)
+    start_year = int(first_date.split("-")[0])
+    end_year = datetime.datetime.utcnow().year
+    print(f"[INFO] Archivierung von {start_year} bis {end_year} für {page_info.name}")
+
+    for year in range(start_year, end_year + 1):
+        since = f"{year}-01-01"
+        until = f"{year}-12-31"
+        year_out = str(Path(args.out) / str(year))
+        print(f"[INFO] -> Jahr {year} ({since} bis {until})")
+        arch = FacebookArchiver(
+            page=args.page,
+            access_token=args.access_token,
+            outdir=year_out,
+            since=since,
+            until=until,
+            media=not args.no_media,
+            limit=args.limit,
+        )
+        try:
+            arch.run()
+        except Exception as e:
+            print(f"[WARN] Fehler bei Jahr {year}: {e}")
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    run_split_by_years(args)
