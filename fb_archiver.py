@@ -133,6 +133,16 @@ def safe_filename(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "-", name)[:200]
 
 
+def to_utc_epoch(dt_str: str) -> int:
+    """Konvertiert einen Datum/Zeit-String in Sekunden seit Epoche (UTC)."""
+    dt = dtparse.parse(dt_str)
+    if getattr(dt, "tzinfo", None) is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return int(dt.timestamp())
+
+
 class FacebookArchiver:
     def __init__(
         self,
@@ -212,9 +222,9 @@ class FacebookArchiver:
         ]
         params = {"fields": ",".join(fields), "limit": self.limit}
         if self.since:
-            params["since"] = int(dtparse.parse(self.since).timestamp())
+            params["since"] = to_utc_epoch(self.since)
         if self.until:
-            params["until"] = int(dtparse.parse(self.until).timestamp())
+            params["until"] = to_utc_epoch(self.until)
 
         endpoint = f"{self.page_info.id}/posts"
         next_url = None
@@ -353,35 +363,42 @@ class FacebookArchiver:
         """Gibt Liste (local_path, source_url) zurück für gespeicherte Dateien."""
         saved: List[Tuple[str, str]] = []
         atts = (post.get("attachments") or {}).get("data") or []
-        for a in atts:
-            mtype = (a.get("media_type") or "").lower()
-            media = a.get("media") or {}
-            src = None
-            subdir = "images"
-            if mtype in ("photo", "image"):
-                src = (
-                    (media.get("image") or {}).get("src")
-                    or a.get("unshimmed_url")
-                    or a.get("url")
-                )
-                subdir = "images"
-            elif mtype in ("video", "native_video"):
-                # Versuch, Video direkt über /videos zu holen
-                self.download_video_from_post(post.get("id"))
-                continue
-            else:
-                # Links/Alben etc. überspringen
-                continue
-            if not src:
-                continue
-            try:
-                local = self._download_stream(src, subdir)
-                if local:
-                    saved.append((local, src))
-            except Exception:
-                # Medienfehler nicht abbrechen, aber vermerken
-                self.append_sources_manifest(f"WARN media download failed: {src}")
+        for attachment in atts:
+            self._process_attachment_media(post.get("id"), attachment, saved)
         return saved
+
+    def _process_attachment_media(
+        self, post_id: Optional[str], attachment: Dict, saved: List[Tuple[str, str]]
+    ) -> None:
+        subattachments = (attachment.get("subattachments") or {}).get("data") or []
+        for sub in subattachments:
+            self._process_attachment_media(post_id, sub, saved)
+
+        mtype = (attachment.get("media_type") or "").lower()
+        media = attachment.get("media") or {}
+
+        if mtype in ("video", "native_video"):
+            # Versuch, Video direkt über /videos zu holen
+            if post_id:
+                self.download_video_from_post(post_id)
+            return
+
+        src = (
+            (media.get("image") or {}).get("src")
+            or attachment.get("unshimmed_url")
+            or attachment.get("url")
+        )
+
+        if not src:
+            return
+
+        try:
+            local = self._download_stream(src, "images")
+            if local:
+                saved.append((local, src))
+        except Exception:
+            # Medienfehler nicht abbrechen, aber vermerken
+            self.append_sources_manifest(f"WARN media download failed: {src}")
 
     def _download_stream(self, url: str, subdir: str) -> Optional[str]:
         r = self.session.get(url, timeout=60, stream=True)
