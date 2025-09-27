@@ -15,8 +15,7 @@ FUNKTION
 WICHTIG
 - Arbeitet mit der offiziellen Facebook Graph API.
 - Archiviert öffentliche Inhalte einer Facebook-Seite, für die ihr berechtigt seid.
-- Nachrichten/Inbox werden nur archiviert, wenn das Token die Scopes
-  `pages_manage_inbox` und `pages_messaging` besitzt.
+- Nachrichten/Inbox werden nur archiviert, wenn das Token die Scopes `pages_messaging` (und ggf. `pages_manage_metadata`) besitzt.
 - Private Profile/Gruppen sind nicht unterstützt (API-Beschränkung).
 
 VORAUSSETZUNGEN
@@ -423,8 +422,7 @@ Inhalte:
 Hinweise:
 - Kommentare und Nachrichten enthalten personenbezogene Daten. Zugriff ggf. beschränken (DSGVO!).
 - Medien-Downloads sind best effort; manche Videos/Bilder sind nicht direkt abrufbar.
-- Nachrichten-Archivierung erfordert zusätzliche Berechtigungen im Access Token:
-  pages_manage_inbox und pages_messaging.
+- Nachrichten-Archivierung erfordert zusätzliche Berechtigungen im Access Token: pages_messaging (und ggf. pages_manage_metadata).
 """.strip()
         with open(self.path("README.txt"), "w", encoding="utf-8") as f:
             f.write(txt)
@@ -551,6 +549,7 @@ Hinweise:
                 )
                 # Nachrichten innerhalb der Konversation
                 for msg in self.get_messages(conv_id):
+                    msg['conversation_id'] = conv_id
                     msg_jsonl.write(json.dumps(msg, ensure_ascii=False) + "\n")
                     msg_rows.append(
                         {
