@@ -34,7 +34,7 @@
     .muted{ color:var(--muted); font-size:12px; }
     .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .pill{ font-size:11px; padding:4px 8px; border-radius:999px; border:1px solid #1f2937; color:var(--muted); }
-    table{ width:100%; border-collapse:collapse; }
+    table{ width:100%; border-collapse:collapse; table-layout:auto; min-width:1000px; }
     th, td{ text-align:left; padding:10px; border-bottom:1px solid #1f2937; vertical-align:top; }
     th{ position:sticky; top:0; background:#f0f2f5; z-index:1; }
     .table-wrap{ max-height:65vh; overflow:auto; border-radius:12px; border:1px solid #1f2937; }
@@ -45,6 +45,22 @@
     .footer{ margin:18px 0 8px; color:var(--muted); font-size:12px; display:flex; gap:12px; align-items:center; justify-content:space-between; background:#f0f2f5; padding:8px; border-radius:8px; }
     .gallery{ display:grid; grid-template-columns: repeat(auto-fill,minmax(160px,1fr)); gap:10px; }
     .thumb{ background:#fff; border:1px solid #dddfe2; border-radius:8px; padding:6px; }
+    .nowrap{ white-space:nowrap; }
+    .scroll-x{ overflow-x:auto; }
+    .clip{ white-space:pre-wrap; }
+    #tblPostThreads td, #tblConversationThreads td{ vertical-align:top; }
+    #tblPostThreads td.col-date, #tblConversationThreads td.col-date{ width:150px; }
+    #tblPostThreads td.col-type, #tblConversationThreads td.col-type{ width:120px; }
+    #tblPostThreads td.col-id{ width:170px; }
+    #tblConversationThreads td.col-id{ width:170px; }
+    #tblConversationThreads td.col-msg{ width:170px; }
+    #tblPostThreads td.col-author{ width:170px; }
+    #tblPostThreads td.col-depth{ width:70px; text-align:center; }
+    #tblPostThreads td.col-interaction{ width:170px; }
+    #tblPostThreads td.col-text, #tblConversationThreads td.col-text{ width:320px; }
+    #tblPostThreads td.col-link, #tblConversationThreads td.col-link{ width:110px; }
+    #tblConversationThreads td.col-from{ width:170px; }
+    #tblConversationThreads td.col-to{ width:200px; }
     .thumb img, .thumb video{ width:100%; height:120px; object-fit:cover; border-radius:6px; background:#f0f2f5; }
     .dropzone{ border:2px dashed #ccd0d5; border-radius:8px; padding:14px; text-align:center; color:var(--muted); background:#f5f6f7; }
     @media (max-width: 960px){ .grid{ grid-template-columns: 1fr; } }
@@ -69,10 +85,8 @@
           <label>von <input id="from" type="date"></label>
           <label>bis <input id="to" type="date"></label>
           <select id="scope">
-            <option value="posts">Posts</option>
-            <option value="comments">Kommentare</option>
-            <option value="conversations">Konversationen</option>
-            <option value="messages">Nachrichten</option>
+            <option value="postThreads" selected>Posts + Kommentare</option>
+            <option value="conversationThreads">Konversationen + Nachrichten</option>
           </select>
           <button class="ghost small" id="resetFilters">Zurücksetzen</button>
         </div>
@@ -85,42 +99,28 @@
     </div>
 
     <div class="tabs" role="tablist">
-      <div class="tab active" data-tab="posts">Posts</div>
-      <div class="tab" data-tab="comments">Kommentare</div>
-      <div class="tab" data-tab="conversations">Konversationen</div>
-      <div class="tab" data-tab="messages">Nachrichten</div>
+      <div class="tab active" data-tab="postThreads">Posts + Kommentare</div>
+      <div class="tab" data-tab="conversationThreads">Konversationen + Nachrichten</div>
       <div class="tab" data-tab="media">Medien</div>
       <div class="tab" data-tab="manifests">Manifeste</div>
     </div>
 
     <div id="content">
-      <section data-panel="posts" class="panel">
+      <section data-panel="postThreads" class="panel">
         <div class="statbar">
           <div class="stat"><div class="kicker">Anzahl Posts</div><div class="n" id="statPosts">0</div></div>
           <div class="stat"><div class="kicker">Kommentare (gesamt)</div><div class="n" id="statComments">0</div></div>
           <div class="stat"><div class="kicker">Reaktionen (Summe)</div><div class="n" id="statReacts">0</div></div>
           <div class="stat"><div class="kicker">Zeitraum</div><div class="n" id="statRange">–</div></div>
         </div>
-        <div class="table-wrap"><table id="tblPosts"><thead><tr>
-          <th>Datum</th><th>Post‑ID</th><th>Text</th><th>Reaktionen</th><th>Shares</th><th>Permalink</th>
+        <div class="table-wrap scroll-x"><table id="tblPostThreads"><thead><tr>
+          <th>Datum</th><th>Typ</th><th>Post-ID</th><th>Kommentar-ID</th><th>Autor</th><th>Ebene</th><th>Interaktion</th><th>Text</th><th>Permalink</th>
         </tr></thead><tbody></tbody></table></div>
       </section>
 
-      <section data-panel="comments" class="panel" hidden>
-        <div class="table-wrap"><table id="tblComments"><thead><tr>
-          <th>Datum</th><th>Post‑ID</th><th>Kommentar‑ID</th><th>Autor</th><th>Likes</th><th>Ebene</th><th>Text</th><th>Permalink</th>
-        </tr></thead><tbody></tbody></table></div>
-      </section>
-
-      <section data-panel="conversations" class="panel" hidden>
-        <div class="table-wrap"><table id="tblConversations"><thead><tr>
-          <th>Aktualisiert</th><th>Konv‑ID</th><th>Teilnehmer</th><th>Link</th>
-        </tr></thead><tbody></tbody></table></div>
-      </section>
-
-      <section data-panel="messages" class="panel" hidden>
-        <div class="table-wrap"><table id="tblMessages"><thead><tr>
-          <th>Datum</th><th>Konv‑ID</th><th>Msg‑ID</th><th>Von</th><th>An</th><th>Text</th>
+      <section data-panel="conversationThreads" class="panel" hidden>
+        <div class="table-wrap scroll-x"><table id="tblConversationThreads"><thead><tr>
+          <th>Datum</th><th>Typ</th><th>Konv-ID</th><th>Msg-ID</th><th>Von</th><th>An / Teilnehmer</th><th>Text</th><th>Link</th>
         </tr></thead><tbody></tbody></table></div>
       </section>
 
@@ -161,7 +161,7 @@ const csv = rows => rows.map(r=>r.map(x=>{
 const state = {
   dir: null,
   files: new Map(), // key: relative path, value: File
-  data: { posts: [], comments: [], conversations: [], messages: [] },
+  data: { posts: [], comments: [], postThreads: [], conversations: [], messages: [], conversationThreads: [] },
   mediaMap: new Map(), // post_id -> [paths]
   pageInfo: { name: '–', id: '–', link: null },
   dateRange: { from:null, to:null },
@@ -173,7 +173,9 @@ $$$('.tab').forEach(t => t.addEventListener('click', () => {
   t.classList.add('active');
   const id=t.dataset.tab;
   $$$('[data-panel]').forEach(p=>p.hidden = p.dataset.panel!==id);
-  $$('#scope').value = id;
+  if(id==='postThreads' || id==='conversationThreads'){
+    $$('#scope').value = id;
+  }
   render();
 }));
 
@@ -306,8 +308,10 @@ async function parseAll(){
   // reset accumulators
   state.data.posts = [];
   state.data.comments = [];
+  state.data.postThreads = [];
   state.data.conversations = [];
   state.data.messages = [];
+  state.data.conversationThreads = [];
   // aggregate across all loaded files
   for(const [path,file] of state.files){
     if(/posts\.jsonl$/.test(path)){
@@ -338,6 +342,8 @@ async function parseAll(){
       if(u){ if(!state.dateRange.to || u > state.dateRange.to) state.dateRange.to = u; }
     }
   }
+  buildPostThreads();
+  buildConversationThreads();
   updateHeaderInfo();
 }
 
@@ -362,130 +368,518 @@ async function readJSONL(file){
   return arr;
 }
 
+function pickDateValue(entry, preferField){
+  if(!entry) return null;
+  if(typeof entry === "string") return entry;
+  if(preferField && entry[preferField]) return entry[preferField];
+  if(entry.created_time) return entry.created_time;
+  if(entry.created_time_iso) return entry.created_time_iso;
+  if(entry.created_at) return entry.created_at;
+  if(entry.created) return entry.created;
+  if(entry.updated_time) return entry.updated_time;
+  if(entry.updated) return entry.updated;
+  return null;
+}
+
+function timeValueFrom(entry, preferField){
+  const val = pickDateValue(entry, preferField);
+  if(!val) return Number.NEGATIVE_INFINITY;
+  const t = Date.parse(val);
+  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
+}
+
+function extractPostIdFromComment(comment){
+  if(!comment) return null;
+  if(comment.post_id) return comment.post_id;
+  if(comment.root_post_id) return comment.root_post_id;
+  if(comment.parent && comment.parent.id){
+    const pid = comment.parent.id;
+    if(typeof pid === "string" && pid.includes("_")){
+      const parts = pid.split("_");
+      if(parts.length >= 2) return parts[0] + "_" + parts[1];
+    }
+    if(pid) return pid;
+  }
+  if(comment.parent_id && typeof comment.parent_id === "string"){
+    if(comment.parent_id.includes("_")){
+      const parts = comment.parent_id.split("_");
+      if(parts.length >= 2) return parts[0] + "_" + parts[1];
+    }
+  }
+  if(comment.id && typeof comment.id === "string" && comment.id.includes("_")){
+    const parts = comment.id.split("_");
+    if(parts.length >= 2) return parts[0] + "_" + parts[1];
+  }
+  return null;
+}
+
+function latestMessageTime(list){
+  if(!list || !list.length) return Number.NEGATIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for(const msg of list){
+    const val = timeValueFrom(msg, "created_time");
+    if(val > max) max = val;
+  }
+  return max;
+}
+
+function gatherParticipantsFromMessages(list){
+  if(!list || !list.length) return "";
+  const names = new Set();
+  for(const msg of list){
+    if(msg && msg.from && msg.from.name) names.add(msg.from.name);
+    const recipients = (msg && msg.to && msg.to.data) ? msg.to.data : [];
+    for(const rec of recipients){
+      if(rec && rec.name) names.add(rec.name);
+    }
+  }
+  return Array.from(names).join(", ");
+}
+
+function sanitizeThreadId(value){
+  if(!value) return '';
+  let thread = String(value).trim();
+  if(thread.startsWith('t_')) thread = thread.slice(2);
+  return thread;
+}
+
+function guessThreadMeta(pageId, conversation, messages, existingLink){
+  const meta = { mailboxId: '', threadType: '' };
+
+  const trySetFromLink = (link) => {
+    if(!link || typeof link !== 'string') return;
+    try{
+      const url = new URL(link);
+      const mailboxParam = url.searchParams.get('mailbox_id');
+      const threadParam = url.searchParams.get('thread_type');
+      if(mailboxParam && !meta.mailboxId) meta.mailboxId = mailboxParam.trim();
+      if(threadParam && !meta.threadType) meta.threadType = threadParam.trim();
+    }catch{
+      /* ignore */
+    }
+  };
+
+  if(conversation){
+    if(typeof conversation.mailbox_id === 'string' && conversation.mailbox_id.trim()){
+      meta.mailboxId = conversation.mailbox_id.trim();
+    }
+    if(typeof conversation.thread_type === 'string' && conversation.thread_type.trim()){
+      meta.threadType = conversation.thread_type.trim();
+    }
+    if(typeof conversation.link === 'string'){
+      trySetFromLink(conversation.link);
+    }
+  }
+
+  const considerMessages = Array.isArray(messages) ? messages : [];
+  for(const msg of considerMessages){
+    if(typeof msg?.conversation_link === 'string') trySetFromLink(msg.conversation_link);
+    if(!meta.threadType && typeof msg?.platform === 'string'){
+      const platform = msg.platform.trim().toLowerCase();
+      if(platform.includes('instagram')) meta.threadType = 'IG_MESSAGE';
+    }
+    if(!meta.threadType){
+      const fromId = msg?.from?.id;
+      const toIds = (msg?.to?.data || []).map(entry => entry?.id);
+      const igId = (val) => typeof val === 'string' && /^17[89]/.test(val.trim());
+      if(igId(fromId) || toIds.some(igId)) meta.threadType = 'IG_MESSAGE';
+    }
+  }
+
+  if(existingLink) trySetFromLink(existingLink);
+
+  if(!meta.mailboxId){
+    const sanitizedPage = pageId ? String(pageId).trim() : '';
+    meta.mailboxId = sanitizedPage;
+  }
+  if(!meta.threadType){
+    meta.threadType = (meta.mailboxId && meta.mailboxId.startsWith('178')) ? 'IG_MESSAGE' : 'FACEBOOK_MESSAGE';
+  }
+
+  return meta;
+}
+
+function buildBusinessInboxLink(pageId, selectedItemId, existingLink, meta){
+  const base = 'https://business.facebook.com/latest/inbox/all';
+  const sanitizedPage = pageId ? String(pageId).trim() : '';
+  const sanitizedThread = sanitizeThreadId(selectedItemId);
+  const mailboxId = meta && meta.mailboxId ? meta.mailboxId : sanitizedPage;
+  const threadType = meta && meta.threadType ? meta.threadType : '';
+
+  const params = new URLSearchParams();
+  if(sanitizedPage) params.set('asset_id', sanitizedPage);
+  if(mailboxId) params.set('mailbox_id', mailboxId);
+  if(threadType) params.set('thread_type', threadType);
+  if(sanitizedThread) params.set('selected_item_id', sanitizedThread);
+  params.set('nav_ref', 'manage_page_ap_plus_default');
+
+  const url = new URL(base);
+  params.forEach((value, key) => url.searchParams.set(key, value));
+  return url.toString();
+}
+
+function buildPostThreads(){
+  const postsById = new Map();
+  for(const post of state.data.posts){
+    const pid = post.id || post.post_id;
+    if(!pid) continue;
+    if(!postsById.has(pid) || timeValueFrom(post) > timeValueFrom(postsById.get(pid))){
+      postsById.set(pid, post);
+    }
+  }
+  const commentGroups = new Map();
+  for(const comment of state.data.comments){
+    const pid = extractPostIdFromComment(comment);
+    if(!pid) continue;
+    if(!commentGroups.has(pid)) commentGroups.set(pid, []);
+    commentGroups.get(pid).push(comment);
+  }
+  const rows = [];
+  const processed = new Set();
+  const postEntries = Array.from(postsById.entries()).sort((a,b)=> timeValueFrom(b[1]) - timeValueFrom(a[1]));
+  for(const [pid, post] of postEntries){
+    const created = pickDateValue(post);
+    const updated = pickDateValue(post, "updated_time");
+    const author = (post.from && post.from.name) || state.pageInfo.name || "";
+    const message = (post.message || post.story || "").replace(/\s+/g, " ").trim();
+    const reactionsRaw = post.reactions_total != null ? post.reactions_total : (post.reactions && post.reactions.summary ? post.reactions.summary.total_count : 0);
+    const sharesRaw = post.shares_count != null ? post.shares_count : (post.shares ? post.shares.count : 0);
+    const reactions = Number(reactionsRaw) || 0;
+    const shares = Number(sharesRaw) || 0;
+    const interactionParts = [];
+    if(reactions) interactionParts.push(`Reaktionen: ${reactions}`);
+    if(shares) interactionParts.push(`Shares: ${shares}`);
+    rows.push({
+      type: "post",
+      type_label: "Post",
+      created_time: created,
+      updated_time: updated,
+      post_id: pid,
+      comment_id: "",
+      author,
+      depth: 0,
+      interaction: interactionParts.join(" · "),
+      message,
+      permalink_url: post.permalink_url || post.link || "",
+      parent_comment_id: "",
+      orphan: false,
+    });
+    processed.add(pid);
+    const comments = (commentGroups.get(pid) || []).slice().sort((a,b)=> timeValueFrom(a, "created_time") - timeValueFrom(b, "created_time"));
+    for(const comment of comments){
+      const createdC = pickDateValue(comment, "created_time");
+      const depth = typeof comment.depth === "number" ? comment.depth : (comment.parent_id ? 1 : 0);
+      const likeCount = Number(comment.like_count != null ? comment.like_count : 0) || 0;
+      rows.push({
+        type: "comment",
+        type_label: "Kommentar",
+        created_time: createdC,
+        updated_time: createdC,
+        post_id: pid,
+        comment_id: comment.id || "",
+        author: (comment.from && comment.from.name) || "",
+        depth,
+        interaction: likeCount ? `Likes: ${likeCount}` : "",
+        message: (comment.message || "").replace(/\s+/g, " ").trim(),
+        permalink_url: comment.permalink_url || "",
+        parent_comment_id: comment.parent_comment_id || comment.parent_id || "",
+        orphan: false,
+      });
+    }
+  }
+  for(const [pid, comments] of commentGroups.entries()){
+    if(processed.has(pid)) continue;
+    const sorted = comments.slice().sort((a,b)=> timeValueFrom(a, "created_time") - timeValueFrom(b, "created_time"));
+    const firstCreated = pickDateValue(sorted[0], "created_time");
+    rows.push({
+      type: "post",
+      type_label: "Post (nur Kommentare)",
+      created_time: firstCreated,
+      updated_time: firstCreated,
+      post_id: pid,
+      comment_id: "",
+      author: "",
+      depth: 0,
+      interaction: "",
+      message: "[Kein Post im Archiv]",
+      permalink_url: "",
+      parent_comment_id: "",
+      orphan: true,
+    });
+    for(const comment of sorted){
+      const createdC = pickDateValue(comment, "created_time");
+      const depth = typeof comment.depth === "number" ? comment.depth : (comment.parent_id ? 1 : 0);
+      const likeCount = Number(comment.like_count != null ? comment.like_count : 0) || 0;
+      rows.push({
+        type: "comment",
+        type_label: "Kommentar",
+        created_time: createdC,
+        updated_time: createdC,
+        post_id: pid,
+        comment_id: comment.id || "",
+        author: (comment.from && comment.from.name) || "",
+        depth,
+        interaction: likeCount ? `Likes: ${likeCount}` : "",
+        message: (comment.message || "").replace(/\s+/g, " ").trim(),
+        permalink_url: comment.permalink_url || "",
+        parent_comment_id: comment.parent_comment_id || comment.parent_id || "",
+        orphan: true,
+      });
+    }
+  }
+  state.data.postThreads = rows;
+}
+
+function buildConversationThreads(){
+  const pageId = state.pageInfo && state.pageInfo.id ? state.pageInfo.id : '';
+  const convById = new Map();
+  for(const conv of state.data.conversations){
+    const id = conv.id || conv.conversation_id;
+    if(!id) continue;
+    if(!convById.has(id) || timeValueFrom(conv, "updated_time") > timeValueFrom(convById.get(id), "updated_time")){
+      convById.set(id, conv);
+    }
+  }
+  const msgGroups = new Map();
+  for(const msg of state.data.messages){
+    const convId = msg.conversation_id || msg.thread_id || msg.id || null;
+    if(!convId) continue;
+    if(!msgGroups.has(convId)) msgGroups.set(convId, []);
+    msgGroups.get(convId).push(msg);
+  }
+  const allIds = new Set([...convById.keys(), ...msgGroups.keys()]);
+  const rows = [];
+  const sortedIds = Array.from(allIds).sort((a,b)=>{
+    const convA = convById.get(a);
+    const convB = convById.get(b);
+    const timeA = Math.max(timeValueFrom(convA, "updated_time"), latestMessageTime(msgGroups.get(a)));
+    const timeB = Math.max(timeValueFrom(convB, "updated_time"), latestMessageTime(msgGroups.get(b)));
+    return timeB - timeA;
+  });
+  for(const id of sortedIds){
+    const conv = convById.get(id);
+    const messages = (msgGroups.get(id) || []).slice().sort((a,b)=> timeValueFrom(a, "created_time") - timeValueFrom(b, "created_time"));
+    const convTime = pickDateValue(conv, "updated_time") || pickDateValue(conv, "created_time") || pickDateValue(messages[0], "created_time");
+    const participantList = conv && conv.participants && conv.participants.data ? conv.participants.data : [];
+    const participants = participantList.map(p=>p.name).join(", ") || gatherParticipantsFromMessages(messages);
+    const firstLinkSource = messages.find(m=>m.conversation_link);
+    const initialLinkCandidate = conv && typeof conv.link === 'string' && conv.link.trim()
+      ? conv.link.trim()
+      : (firstLinkSource && typeof firstLinkSource.conversation_link === 'string' && firstLinkSource.conversation_link.trim()
+        ? firstLinkSource.conversation_link.trim()
+        : '');
+
+    let linkSelectedItemId = '';
+    if(initialLinkCandidate){
+      try{
+        const url = new URL(initialLinkCandidate);
+        linkSelectedItemId = url.searchParams.get('selected_item_id') || '';
+      }catch{
+        linkSelectedItemId = '';
+      }
+    }
+
+    const candidateIds = [
+      linkSelectedItemId,
+      conv && conv.selected_item_id,
+      conv && conv.id,
+      id,
+      messages[0] && messages[0].conversation_id,
+      messages[0] && messages[0].id,
+    ];
+    const selectedItemId = candidateIds.map(sanitizeThreadId).find(Boolean) || '';
+
+    const meta = guessThreadMeta(pageId, conv, messages, initialLinkCandidate);
+    const normalizedLink = buildBusinessInboxLink(pageId, selectedItemId, initialLinkCandidate, meta);
+    const snippet = conv && conv.snippet ? conv.snippet : '';
+    rows.push({
+      type: "conversation",
+      type_label: "Konversation",
+      created_time: convTime,
+      updated_time: convTime,
+      conversation_id: id,
+      selected_item_id: selectedItemId,
+      message_id: "",
+      from: "",
+      to: participants,
+      participants,
+      message: snippet,
+      link: normalizedLink,
+      indent: 0,
+    });
+    for(const msg of messages){
+      const created = pickDateValue(msg, "created_time");
+      const toData = msg && msg.to && msg.to.data ? msg.to.data : [];
+      const toNames = toData.map(x=>x.name).join(", ");
+      rows.push({
+        type: "message",
+        type_label: "Nachricht",
+        created_time: created,
+        updated_time: created,
+        conversation_id: id,
+        selected_item_id: selectedItemId,
+        message_id: msg.id || "",
+        from: msg.from && msg.from.name ? msg.from.name : "",
+        to: toNames || participants,
+        participants,
+        message: (msg.message || "").replace(/\s+/g, " ").trim(),
+        link: normalizedLink,
+        indent: 1,
+      });
+    }
+  }
+  state.data.conversationThreads = rows;
+}
+
+
+
+
+
 function getFiltered(scope){
   const qv = ($$('#q').value||'').toLowerCase();
   const f = $$('#from').value? new Date($$('#from').value) : null;
   const t = $$('#to').value? new Date($$('#to').value+'T23:59:59') : null;
-  let rows = [];
-  if(scope==='posts'){
-    rows = state.data.posts.map(p=>({
-      created_time: p.created_time||p.created_time_iso||p.created_at||p.created,
-      post_id: p.id||p.post_id,
-      message: p.message||p.story||'',
-      reactions_total: p.reactions_total ?? (p.reactions?.summary?.total_count),
-      shares_count: p.shares_count ?? (p.shares?.count),
-      permalink_url: p.permalink_url||p.link||''
-    }));
-  } else if(scope==='comments'){
-    rows = state.data.comments.map(c=>({
-      created_time: c.created_time,
-      post_id: c.post_id || (c.parent?.id),
-      comment_id: c.id,
-      author_name: c.from?.name,
-      like_count: c.like_count ?? 0,
-      depth: c.depth ?? 0,
-      message: c.message || '',
-      permalink_url: c.permalink_url || ''
-    }));
-  } else if(scope==='conversations'){
-    rows = state.data.conversations.map(k=>({
-      updated_time: k.updated_time,
-      conversation_id: k.id,
-      participants: (k.participants?.data||[]).map(p=>p.name).join(', '),
-      link: k.link||''
-    }));
-  } else if(scope==='messages'){
-    rows = state.data.messages.map(m=>({
-      created_time: m.created_time,
-      conversation_id: m.conversation_id || '',
-      message_id: m.id,
-      from: m.from?.name||'',
-      to: (m.to?.data||[]).map(x=>x.name).join(', '),
-      message: m.message||''
-    }));
+
+  const base = scope==='postThreads'
+    ? state.data.postThreads
+    : scope==='conversationThreads'
+    ? state.data.conversationThreads
+    : [];
+
+  let rows = base.slice();
+
+  if(qv){
+    rows = rows.filter(row => {
+      return Object.values(row).some(v => {
+        if(v == null) return false;
+        if(typeof v === 'object'){
+          return Object.values(v).some(inner => inner != null && String(inner).toLowerCase().includes(qv));
+        }
+        return String(v).toLowerCase().includes(qv);
+      });
+    });
   }
 
-  // text filter
-  if(qv){
-    rows = rows.filter(r=> Object.values(r).some(v=> (v!=null && (''+v).toLowerCase().includes(qv))));
-  }
-  // date filter
-  const dateKey = scope==='conversations' ? 'updated_time' : 'created_time';
-  rows = rows.filter(r=>{
-    const d = r[dateKey] ? new Date(r[dateKey]) : null;
-    if(!d) return true;
+  rows = rows.filter(row => {
+    const candidate = row.created_time || row.updated_time;
+    if(!candidate) return true;
+    const d = new Date(candidate);
+    if(Number.isNaN(d)) return true;
     if(f && d < f) return false;
     if(t && d > t) return false;
     return true;
   });
+
+  if(scope==='postThreads'){
+    const order = new Map();
+    base.forEach((row, idx) => order.set(row, idx));
+    const needed = new Set();
+    rows.forEach(row => {
+      if(row.type === 'comment' && row.post_id){
+        needed.add(row.post_id);
+      }
+    });
+    if(needed.size){
+      for(const row of base){
+        if(row.type === 'post' && needed.has(row.post_id) && !rows.includes(row)){
+          rows.push(row);
+        }
+      }
+    }
+    rows.sort((a,b)=> (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  } else if(scope==='conversationThreads'){
+    const order = new Map();
+    base.forEach((row, idx) => order.set(row, idx));
+    const needed = new Set();
+    rows.forEach(row => {
+      if(row.type === 'message' && row.conversation_id){
+        needed.add(row.conversation_id);
+      }
+    });
+    if(needed.size){
+      for(const row of base){
+        if(row.type === 'conversation' && needed.has(row.conversation_id) && !rows.includes(row)){
+          rows.push(row);
+        }
+      }
+    }
+    rows.sort((a,b)=> (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  }
+
   $$('#counts').textContent = `${rows.length} Einträge`;
   return rows;
 }
 
+
 function render(){
   const scope = $$('#scope').value;
-  if(scope==='posts') renderPosts();
-  else if(scope==='comments') renderComments();
-  else if(scope==='conversations') renderConversations();
-  else if(scope==='messages') renderMessages();
-}
-
-function renderPosts(){
-  const tbody = $$('#tblPosts tbody'); tbody.innerHTML='';
-  for(const p of getFiltered('posts').slice(0, 5000)){
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td data-ts="${escapeHtml(p.created_time||'')}">${escapeHtml(fmtDate(p.created_time))}</td>
-      <td><code>${escapeHtml(p.post_id)}</code></td>
-      <td>${escapeHtml(p.message||'')}</td>
-      <td>${p.reactions_total??''}</td>
-      <td>${p.shares_count??''}</td>
-      <td>${p.permalink_url? `<a target="_blank" href="${escapeHtml(p.permalink_url)}">Link</a>`:''}</td>`;
-    tbody.appendChild(tr);
+  if(scope==='conversationThreads'){
+    renderConversationThreads();
+  }else{
+    renderPostThreads();
   }
 }
 
-function renderComments(){
-  const tbody = $$('#tblComments tbody'); tbody.innerHTML='';
-  for(const c of getFiltered('comments').slice(0, 5000)){
+function renderPostThreads(){
+  const tbody = $$('#tblPostThreads tbody'); tbody.innerHTML='';
+  const rows = getFiltered('postThreads').slice(0, 5000);
+  rows.forEach(row => {
     const tr = document.createElement('tr');
+    const typeLabel = row.type_label || (row.type === 'comment' ? 'Kommentar' : 'Post');
+    let depthRaw = 0;
+    if(row.type === 'comment'){
+      const parsedDepth = Number(row.depth);
+      depthRaw = Number.isFinite(parsedDepth) ? parsedDepth : 0;
+    }
+    const indentPx = row.type === 'comment' ? (depthRaw + 1) * 16 : 0;
+    const dateValue = row.created_time || row.updated_time || '';
+    const commentIdCell = row.comment_id ? `<code>${escapeHtml(row.comment_id)}</code>` : '';
+    const depthValue = row.type === 'comment' ? String(row.depth != null ? row.depth : '') : '';
+    const messageHtml = `<span style="padding-left:${indentPx}px;display:inline-block;">${escapeHtml(row.message || '')}</span>`;
+    const postIdCell = row.post_id ? `<div class="clip"><code>${escapeHtml(row.post_id)}</code></div>` : '';
+    const commentIdClip = commentIdCell ? `<div class="clip">${commentIdCell}</div>` : '';
+    const authorClip = row.author ? `<div class="clip">${escapeHtml(row.author)}</div>` : '';
+    const interactionClip = row.interaction ? `<div class="clip">${escapeHtml(row.interaction)}</div>` : '';
+    const messageCell = `<div class="clip" title="${escapeHtml(row.message || '')}">${messageHtml}</div>`;
     tr.innerHTML = `
-      <td data-ts="${escapeHtml(c.created_time||'')}">${escapeHtml(fmtDate(c.created_time))}</td>
-      <td><code>${escapeHtml(c.post_id||'')}</code></td>
-      <td><code>${escapeHtml(c.comment_id||'')}</code></td>
-      <td>${escapeHtml(c.author_name||'')}</td>
-      <td>${c.like_count??''}</td>
-      <td>${c.depth??''}</td>
-      <td>${escapeHtml(c.message||'')}</td>
-      <td>${c.permalink_url? `<a target="_blank" href="${escapeHtml(c.permalink_url)}">Link</a>`:''}</td>`;
+      <td data-ts="${escapeHtml(dateValue)}" class="col-date nowrap">${escapeHtml(fmtDate(dateValue))}</td>
+      <td class="col-type nowrap">${escapeHtml(typeLabel)}</td>
+      <td class="col-id nowrap">${postIdCell}</td>
+      <td class="col-id nowrap">${commentIdClip}</td>
+      <td class="col-author nowrap">${authorClip}</td>
+      <td class="col-depth nowrap">${escapeHtml(depthValue)}</td>
+      <td class="col-interaction nowrap">${interactionClip}</td>
+      <td class="col-text">${messageCell}</td>
+      <td class="col-link nowrap">${row.permalink_url ? `<a target="_blank" href="${escapeHtml(row.permalink_url)}">Link</a>` : ''}</td>`;
     tbody.appendChild(tr);
-  }
+  });
 }
 
-function renderConversations(){
-  const tbody = $$('#tblConversations tbody'); tbody.innerHTML='';
-  for(const k of getFiltered('conversations').slice(0, 5000)){
+function renderConversationThreads(){
+  const tbody = $$('#tblConversationThreads tbody'); tbody.innerHTML='';
+  for(const row of getFiltered('conversationThreads').slice(0, 5000)){
     const tr = document.createElement('tr');
+    const typeLabel = row.type_label || (row.type === 'message' ? 'Nachricht' : 'Konversation');
+    const indentPx = (row.indent || 0) * 16;
+    const dateValue = row.created_time || row.updated_time || '';
+    const messageHtml = `<span style="padding-left:${indentPx}px;display:inline-block;">${escapeHtml(row.message || '')}</span>`;
+    const msgIdCell = row.message_id ? `<code>${escapeHtml(row.message_id)}</code>` : '';
+    const toValue = row.to || row.participants || '';
+    const linkHtml = row.link ? `<a target="_blank" rel="noopener" href="${escapeHtml(row.link)}">Inbox</a>` : '';
+    const convIdClip = row.conversation_id ? `<div class="clip"><code>${escapeHtml(row.conversation_id)}</code></div>` : '';
+    const msgIdClip = msgIdCell ? `<div class="clip">${msgIdCell}</div>` : '';
+    const fromClip = row.from ? `<div class="clip">${escapeHtml(row.from)}</div>` : '';
+    const toClip = toValue ? `<div class="clip" title="${escapeHtml(toValue)}">${escapeHtml(toValue)}</div>` : '';
+    const messageCell = `<div class="clip" title="${escapeHtml(row.message || '')}">${messageHtml}</div>`;
     tr.innerHTML = `
-      <td data-ts="${escapeHtml(k.updated_time||'')}">${escapeHtml(fmtDate(k.updated_time))}</td>
-      <td><code>${escapeHtml(k.conversation_id||'')}</code></td>
-      <td>${escapeHtml(k.participants||'')}</td>
-      <td>${k.link? `<a target="_blank" href="${escapeHtml(k.link)}">Link</a>`:''}</td>`;
-    tbody.appendChild(tr);
-  }
-}
-
-function renderMessages(){
-  const tbody = $$('#tblMessages tbody'); tbody.innerHTML='';
-  for(const m of getFiltered('messages').slice(0, 5000)){
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td data-ts="${escapeHtml(m.created_time||'')}">${escapeHtml(fmtDate(m.created_time))}</td>
-      <td><code>${escapeHtml(m.conversation_id||'')}</code></td>
-      <td><code>${escapeHtml(m.message_id||'')}</code></td>
-      <td>${escapeHtml(m.from||'')}</td>
-      <td>${escapeHtml(m.to||'')}</td>
-      <td>${escapeHtml(m.message||'')}</td>`;
+      <td data-ts="${escapeHtml(dateValue)}" class="col-date nowrap">${escapeHtml(fmtDate(dateValue))}</td>
+      <td class="col-type nowrap">${escapeHtml(typeLabel)}</td>
+      <td class="col-id nowrap">${convIdClip}</td>
+      <td class="col-msg nowrap">${msgIdClip}</td>
+      <td class="col-from nowrap">${fromClip}</td>
+      <td class="col-to">${toClip}</td>
+      <td class="col-text">${messageCell}</td>
+      <td class="col-link nowrap">${linkHtml}</td>`;
     tbody.appendChild(tr);
   }
 }
@@ -567,20 +961,25 @@ function makeTablesSortable(){
         th.classList.add(asc ? "sorted-asc" : "sorted-desc");
 
         // Datumsspalten präzise erkennen
-        const isDateCol = /^(datum|aktualisiert)$/i.test(th.innerText.trim());
+        const headerText = th.innerText.trim().toLowerCase();
+        const isDateCol = /^(datum|aktualisiert)$/.test(headerText);
+        const isLinkCol = headerText === 'link';
 
         const getVal = (row) => {
           const td = row.children[idx];
           const raw = td.innerText.trim();
 
           if(isDateCol){
-            const ts = td.getAttribute("data-ts") || "";
-            const t = Date.parse(ts) || Date.parse(raw.replace(/\s+/g, " "));
+            const ts = td.getAttribute('data-ts') || '';
+            const t = Date.parse(ts) || Date.parse(raw.replace(/\s+/g, ' '));
             return isNaN(t) ? -Infinity : t;
           }
-          // Zahl erkennen (Reaktionen, Shares etc.); ansonsten String
+          if(isLinkCol){
+            const anchor = td.querySelector('a');
+            return anchor ? anchor.href.toLowerCase() : raw.toLowerCase();
+          }
           const hasDigit = /[0-9]/.test(raw);
-          const num = parseFloat(raw.replace(/[^0-9.-]/g,""));
+          const num = parseFloat(raw.replace(/[^0-9.-]/g,''));
           if(hasDigit && !isNaN(num)){
             return num;
           }

@@ -102,6 +102,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from tqdm import tqdm
@@ -530,7 +531,16 @@ Hinweise:
         )
         posts_rows: List[Dict] = []
         comments_rows: List[Dict] = []
-    
+
+        def normalize_str(value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            s = str(value).strip()
+            return s or None
+
+        def sanitize_thread_id(value: Optional[str]) -> Optional[str]:
+            return normalize_str(value[2:]) if (isinstance(value, str) and value.startswith('t_')) else normalize_str(value)
+
         # Posts iterieren
         for post in self.iter_posts():
             pid = post.get("id")
@@ -563,6 +573,11 @@ Hinweise:
             # Kommentare (rekursiv inkl. Replies)
             try:
                 for c in self.get_comments_for_post(pid, depth=0, parent=None):
+                    c["post_id"] = pid
+                    if "root_post_id" not in c:
+                        c["root_post_id"] = pid
+                    if c.get("depth", 0) > 0 and c.get("parent_id"):
+                        c.setdefault("parent_comment_id", c.get("parent_id"))
                     comments_rows.append(
                         {
                             "post_id": pid,
@@ -603,22 +618,78 @@ Hinweise:
         try:
             for conv in self.get_conversations():
                 conv_id = conv.get("id")
+                conv_link = conv.get("link")
+                mailbox_id = normalize_str(conv.get("mailbox_id"))
+                thread_type = normalize_str(conv.get("thread_type"))
+                selected_item_id = sanitize_thread_id(conv.get("selected_item_id"))
+
+                def update_meta_from_link(link_value: Optional[str]) -> None:
+                    nonlocal mailbox_id, thread_type, selected_item_id
+                    if not link_value:
+                        return
+                    try:
+                        parsed = urlparse(link_value)
+                        query = parse_qs(parsed.query)
+                        mailbox_candidate = normalize_str((query.get("mailbox_id") or [None])[0])
+                        thread_candidate = normalize_str((query.get("thread_type") or [None])[0])
+                        selected_candidate = sanitize_thread_id((query.get("selected_item_id") or [None])[0])
+                        if not mailbox_id:
+                            mailbox_id = mailbox_candidate
+                        if not thread_type:
+                            thread_type = thread_candidate
+                        if not selected_item_id:
+                            selected_item_id = selected_candidate
+                    except Exception:
+                        return
+
+                update_meta_from_link(conv_link)
                 conv_jsonl.write(json.dumps(conv, ensure_ascii=False) + "\n")
-                conv_rows.append(
-                    {
-                        "conversation_id": conv_id,
-                        "updated_time": iso8601(conv.get("updated_time")),
-                        "link": conv.get("link"),
-                        "participants": ", ".join(
-                            [
-                                p.get("name")
-                                for p in (conv.get("participants", {}).get("data", []))
-                            ]
-                        ),
-                    }
-                )
+                conv_row = {
+                    "conversation_id": conv_id,
+                    "updated_time": iso8601(conv.get("updated_time")),
+                    "link": conv_link,
+                    "mailbox_id": mailbox_id,
+                    "thread_type": thread_type,
+                    "selected_item_id": selected_item_id,
+                    "participants": ", ".join(
+                        [
+                            p.get("name")
+                            for p in (conv.get("participants", {}).get("data", []))
+                        ]
+                    ),
+                }
+                conv_rows.append(conv_row)
+
                 # Nachrichten innerhalb der Konversation
                 for msg in self.get_messages(conv_id):
+                    msg.setdefault("conversation_id", conv_id)
+                    if conv_link:
+                        msg.setdefault("conversation_link", conv_link)
+
+                    update_meta_from_link(msg.get("conversation_link"))
+
+                    if not mailbox_id:
+                        mailbox_id = normalize_str(msg.get("mailbox_id"))
+                    if not thread_type:
+                        thread_type = normalize_str(msg.get("thread_type"))
+                    if not selected_item_id:
+                        selected_item_id = sanitize_thread_id(
+                            msg.get("selected_item_id")
+                            or msg.get("conversation_id")
+                            or msg.get("id")
+                        )
+
+                    if mailbox_id:
+                        msg.setdefault("mailbox_id", mailbox_id)
+                    if thread_type:
+                        msg.setdefault("thread_type", thread_type)
+                    if selected_item_id:
+                        msg.setdefault("selected_item_id", selected_item_id)
+
+                    conv_row["mailbox_id"] = mailbox_id
+                    conv_row["thread_type"] = thread_type
+                    conv_row["selected_item_id"] = selected_item_id
+
                     msg_jsonl.write(json.dumps(msg, ensure_ascii=False) + "\n")
                     msg_rows.append(
                         {
@@ -636,6 +707,11 @@ Hinweise:
                                 if msg.get("to")
                                 else None
                             ),
+                            "conversation_link": msg.get("conversation_link"),
+                            "mailbox_id": msg.get("mailbox_id") or mailbox_id,
+                            "thread_type": msg.get("thread_type") or thread_type,
+                            "selected_item_id": msg.get("selected_item_id") or selected_item_id,
+                            "platform": msg.get("platform"),
                             "message": (msg.get("message") or "")
                             .replace("\n", " ")
                             .strip(),

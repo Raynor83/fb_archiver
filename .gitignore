@@ -1,1 +1,4 @@
 fb_archive_out/
+backup/fb_archiv_html_viewer.html
+backup/fb_archiver.py
+__pycache__/fb_archiver.cpython-311.pyc
