@@ -15,8 +15,8 @@
   --accent2:#42b72a; /* Messenger/Grün */
 }
     html, body { height: 100%; }
-    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; background:var(--bg); color:var(--text); line-height:1.5;}    
-    .container{ max-width:1200px; margin:20px auto; padding:0 16px; }
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; background:var(--bg); color:var(--text); line-height:1.5;}
+    .container{ max-width:95%; margin:20px auto; padding:0 16px; }
     header{ display:flex; gap:16px; align-items:center; justify-content:space-between; margin-bottom:16px; background:var(--accent); color:#fff; padding:10px 16px; border-radius:8px; }
     h1{ font-size:clamp(20px,2.8vw,28px); margin:0; letter-spacing:.3px; color:white; }
     .bar{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
@@ -29,41 +29,47 @@
     .tab{ padding:10px 12px; border-radius:6px; background:#f0f2f5; border:1px solid transparent; color:var(--muted); cursor:pointer; font-weight:500; } .tab:hover{ background:#e7f3ff; color:var(--accent);}
     .tab.active{ color:var(--accent); border-bottom:3px solid var(--accent); background:#fff; }
     .panel{ background:var(--panel); border:1px solid #dddfe2; border-radius:8px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.1); }
-    .cards{ display:grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+    .cards{ display:grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
     .card{ background:var(--card); border:1px solid #dddfe2; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; box-shadow:0 1px 2px rgba(0,0,0,.08); }
     .muted{ color:var(--muted); font-size:12px; }
     .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .pill{ font-size:11px; padding:4px 8px; border-radius:999px; border:1px solid #1f2937; color:var(--muted); }
-    table{ width:100%; border-collapse:collapse; table-layout:auto; min-width:1000px; }
+    table{ width:100%; border-collapse:collapse; table-layout:auto; }
     th, td{ text-align:left; padding:10px; border-bottom:1px solid #1f2937; vertical-align:top; }
     th{ position:sticky; top:0; background:#f0f2f5; z-index:1; }
-    .table-wrap{ max-height:65vh; overflow:auto; border-radius:12px; border:1px solid #1f2937; }
-    .statbar{ display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin-bottom:12px; }
+    .table-wrap{ max-height:70vh; overflow:auto; border-radius:12px; border:1px solid #1f2937; }
+    .statbar{ display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-bottom:12px; }
     .stat{ background:#fff; border:1px solid #dddfe2; border-radius:8px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
     .stat .n{ font-size:20px; font-weight:700; }
     .kicker{ font-size:12px; color:var(--muted); }
     .footer{ margin:18px 0 8px; color:var(--muted); font-size:12px; display:flex; gap:12px; align-items:center; justify-content:space-between; background:#f0f2f5; padding:8px; border-radius:8px; }
-    .gallery{ display:grid; grid-template-columns: repeat(auto-fill,minmax(160px,1fr)); gap:10px; }
+    .gallery{ display:grid; grid-template-columns: repeat(auto-fill,minmax(180px,1fr)); gap:12px; }
     .thumb{ background:#fff; border:1px solid #dddfe2; border-radius:8px; padding:6px; }
     .nowrap{ white-space:nowrap; }
     .scroll-x{ overflow-x:auto; }
     .clip{ white-space:pre-wrap; }
     #tblPostThreads td, #tblConversationThreads td{ vertical-align:top; }
-    #tblPostThreads td.col-date, #tblConversationThreads td.col-date{ width:150px; }
-    #tblPostThreads td.col-type, #tblConversationThreads td.col-type{ width:120px; }
-    #tblPostThreads td.col-id{ width:170px; }
-    #tblConversationThreads td.col-id{ width:170px; }
-    #tblConversationThreads td.col-msg{ width:170px; }
-    #tblPostThreads td.col-author{ width:170px; }
-    #tblPostThreads td.col-depth{ width:70px; text-align:center; }
-    #tblPostThreads td.col-interaction{ width:170px; }
-    #tblPostThreads td.col-text, #tblConversationThreads td.col-text{ width:320px; }
-    #tblPostThreads td.col-link, #tblConversationThreads td.col-link{ width:110px; }
-    #tblConversationThreads td.col-from{ width:170px; }
-    #tblConversationThreads td.col-to{ width:200px; }
+    #tblPostThreads td.col-date, #tblConversationThreads td.col-date{ min-width:140px; }
+    #tblPostThreads td.col-type, #tblConversationThreads td.col-type{ min-width:100px; }
+    #tblPostThreads td.col-id{ min-width:150px; }
+    #tblConversationThreads td.col-id{ min-width:150px; }
+    #tblConversationThreads td.col-msg{ min-width:150px; }
+    #tblPostThreads td.col-author{ min-width:140px; }
+    #tblPostThreads td.col-depth{ min-width:60px; text-align:center; }
+    #tblPostThreads td.col-interaction{ min-width:140px; }
+    #tblPostThreads td.col-text, #tblConversationThreads td.col-text{ min-width:250px; }
+    #tblPostThreads td.col-link, #tblConversationThreads td.col-link{ min-width:90px; }
+    #tblConversationThreads td.col-from{ min-width:140px; }
+    #tblConversationThreads td.col-to{ min-width:160px; }
     .thumb img, .thumb video{ width:100%; height:120px; object-fit:cover; border-radius:6px; background:#f0f2f5; }
     .dropzone{ border:2px dashed #ccd0d5; border-radius:8px; padding:14px; text-align:center; color:var(--muted); background:#f5f6f7; }
-    @media (max-width: 960px){ .grid{ grid-template-columns: 1fr; } }
+    @media (max-width: 1400px){ .container{ max-width:98%; } }
+    @media (max-width: 960px){
+      .grid{ grid-template-columns: 1fr; }
+      .container{ max-width:100%; padding:0 8px; }
+      .statbar{ grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+      header{ flex-direction:column; align-items:flex-start; }
+    }
   </style>
 </head>
 <body>
@@ -101,6 +107,10 @@
     <div class="tabs" role="tablist">
       <div class="tab active" data-tab="postThreads">Posts + Kommentare</div>
       <div class="tab" data-tab="conversationThreads">Konversationen + Nachrichten</div>
+      <div class="tab" data-tab="albums">Alben</div>
+      <div class="tab" data-tab="photos">Fotos</div>
+      <div class="tab" data-tab="events">Events</div>
+      <div class="tab" data-tab="liveVideos">Live Videos</div>
       <div class="tab" data-tab="media">Medien</div>
       <div class="tab" data-tab="manifests">Manifeste</div>
     </div>
@@ -121,6 +131,41 @@
       <section data-panel="conversationThreads" class="panel" hidden>
         <div class="table-wrap scroll-x"><table id="tblConversationThreads"><thead><tr>
           <th>Datum</th><th>Typ</th><th>Konv-ID</th><th>Msg-ID</th><th>Von</th><th>An / Teilnehmer</th><th>Text</th><th>Link</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section data-panel="albums" class="panel" hidden>
+        <div class="statbar">
+          <div class="stat"><div class="kicker">Anzahl Alben</div><div class="n" id="statAlbums">0</div></div>
+          <div class="stat"><div class="kicker">Fotos gesamt</div><div class="n" id="statAlbumPhotos">0</div></div>
+        </div>
+        <div class="cards" id="albumsView"></div>
+      </section>
+
+      <section data-panel="photos" class="panel" hidden>
+        <div class="statbar">
+          <div class="stat"><div class="kicker">Anzahl Fotos</div><div class="n" id="statPhotos">0</div></div>
+        </div>
+        <div class="gallery" id="photosGallery"></div>
+      </section>
+
+      <section data-panel="events" class="panel" hidden>
+        <div class="statbar">
+          <div class="stat"><div class="kicker">Anzahl Events</div><div class="n" id="statEvents">0</div></div>
+          <div class="stat"><div class="kicker">Interessiert (gesamt)</div><div class="n" id="statEventsInterested">0</div></div>
+        </div>
+        <div class="table-wrap scroll-x"><table id="tblEvents"><thead><tr>
+          <th>Startdatum</th><th>Enddatum</th><th>Name</th><th>Beschreibung</th><th>Ort</th><th>Interessiert</th><th>Zusagen</th><th>Kategorie</th><th>Status</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section data-panel="liveVideos" class="panel" hidden>
+        <div class="statbar">
+          <div class="stat"><div class="kicker">Anzahl Live Videos</div><div class="n" id="statLiveVideos">0</div></div>
+          <div class="stat"><div class="kicker">Gesamt-Views</div><div class="n" id="statLiveVideoViews">0</div></div>
+        </div>
+        <div class="table-wrap scroll-x"><table id="tblLiveVideos"><thead><tr>
+          <th>Erstellt</th><th>Broadcast Start</th><th>Titel</th><th>Beschreibung</th><th>Status</th><th>Live Views</th><th>Total Views</th><th>Link</th>
         </tr></thead><tbody></tbody></table></div>
       </section>
 
@@ -161,7 +206,7 @@ const csv = rows => rows.map(r=>r.map(x=>{
 const state = {
   dir: null,
   files: new Map(), // key: relative path, value: File
-  data: { posts: [], comments: [], postThreads: [], conversations: [], messages: [], conversationThreads: [] },
+  data: { posts: [], comments: [], postThreads: [], conversations: [], messages: [], conversationThreads: [], albums: [], photos: [], events: [], reactions: [], live_videos: [] },
   mediaMap: new Map(), // post_id -> [paths]
   pageInfo: { name: '–', id: '–', link: null },
   dateRange: { from:null, to:null },
@@ -231,6 +276,11 @@ async function loadFromDirectory(){
   await addFileIfExists('data/comments.jsonl');
   await addFileIfExists('data/conversations.jsonl');
   await addFileIfExists('data/messages.jsonl');
+  await addFileIfExists('data/albums.jsonl');
+  await addFileIfExists('data/photos.jsonl');
+  await addFileIfExists('data/events.jsonl');
+  await addFileIfExists('data/reactions.jsonl');
+  await addFileIfExists('data/live_videos.jsonl');
   await addFileIfExists('manifests/sources.txt');
   await addMediaDir('media/images');
   await addMediaDir('media/videos');
@@ -245,6 +295,11 @@ async function loadFromDirectory(){
         await addFileIfExists(`${sub}/data/comments.jsonl`);
         await addFileIfExists(`${sub}/data/conversations.jsonl`);
         await addFileIfExists(`${sub}/data/messages.jsonl`);
+        await addFileIfExists(`${sub}/data/albums.jsonl`);
+        await addFileIfExists(`${sub}/data/photos.jsonl`);
+        await addFileIfExists(`${sub}/data/events.jsonl`);
+        await addFileIfExists(`${sub}/data/reactions.jsonl`);
+        await addFileIfExists(`${sub}/data/live_videos.jsonl`);
         await addFileIfExists(`${sub}/manifests/sources.txt`);
         await addMediaDir(`${sub}/media/images`);
         await addMediaDir(`${sub}/media/videos`);
@@ -312,6 +367,11 @@ async function parseAll(){
   state.data.conversations = [];
   state.data.messages = [];
   state.data.conversationThreads = [];
+  state.data.albums = [];
+  state.data.photos = [];
+  state.data.events = [];
+  state.data.reactions = [];
+  state.data.live_videos = [];
   // aggregate across all loaded files
   for(const [path,file] of state.files){
     if(/posts\.jsonl$/.test(path)){
@@ -326,6 +386,21 @@ async function parseAll(){
     } else if(/messages\.jsonl$/.test(path)){
       const arr = await readJSONL(file);
       state.data.messages = state.data.messages.concat(arr);
+    } else if(/albums\.jsonl$/.test(path)){
+      const arr = await readJSONL(file);
+      state.data.albums = state.data.albums.concat(arr);
+    } else if(/photos\.jsonl$/.test(path)){
+      const arr = await readJSONL(file);
+      state.data.photos = state.data.photos.concat(arr);
+    } else if(/events\.jsonl$/.test(path)){
+      const arr = await readJSONL(file);
+      state.data.events = state.data.events.concat(arr);
+    } else if(/reactions\.jsonl$/.test(path)){
+      const arr = await readJSONL(file);
+      state.data.reactions = state.data.reactions.concat(arr);
+    } else if(/live_videos\.jsonl$/.test(path)){
+      const arr = await readJSONL(file);
+      state.data.live_videos = state.data.live_videos.concat(arr);
     } else if(/README\.txt$/.test(path)) {
       const txt = await file.text();
       // Set pageInfo only once (from the first README found)
@@ -352,8 +427,10 @@ function updateHeaderInfo(){
   $$('#dateInfo').textContent = `Zeitraum: ${state.dateRange.from||'–'} bis ${state.dateRange.to||'–'}`;
   $$('#statPosts').textContent = state.data.posts.length;
   $$('#statComments').textContent = state.data.comments.length;
-  const reacts = state.data.posts.reduce((a,b)=>a+ (Number(b.reactions?.summary?.total_count||b.reactions_total||0)||0),0);
-  $$('#statReacts').textContent = reacts;
+  // Use detailed reactions count if available, otherwise fallback to summary
+  const detailedReactCount = state.data.reactions.length;
+  const summaryReactCount = state.data.posts.reduce((a,b)=>a+ (Number(b.reactions?.summary?.total_count||b.reactions_total||0)||0),0);
+  $$('#statReacts').textContent = detailedReactCount > 0 ? detailedReactCount : summaryReactCount;
   const dates = state.data.posts.map(p=>new Date(p.created_time||p.createdTime||p.created||p.created_at||0)).filter(d=>d>0).sort((a,b)=>a-b);
   $$('#statRange').textContent = dates.length? `${dates[0].toLocaleDateString()} – ${dates[dates.length-1].toLocaleDateString()}` : '–';
 }
@@ -459,25 +536,24 @@ function guessThreadMeta(pageId, conversation, messages, existingLink){
     }
   };
 
-  if(conversation){
-    if(typeof conversation.mailbox_id === 'string' && conversation.mailbox_id.trim()){
-      meta.mailboxId = conversation.mailbox_id.trim();
-    }
-    if(typeof conversation.thread_type === 'string' && conversation.thread_type.trim()){
-      meta.threadType = conversation.thread_type.trim();
-    }
-    if(typeof conversation.link === 'string'){
-      trySetFromLink(conversation.link);
-    }
-  }
-
+  // PRIORITY 1: Check messages first for already extracted metadata
   const considerMessages = Array.isArray(messages) ? messages : [];
   for(const msg of considerMessages){
+    // Use already extracted mailbox_id and thread_type from Python script
+    if(!meta.mailboxId && typeof msg?.mailbox_id === 'string' && msg.mailbox_id.trim()){
+      meta.mailboxId = msg.mailbox_id.trim();
+    }
+    if(!meta.threadType && typeof msg?.thread_type === 'string' && msg.thread_type.trim()){
+      meta.threadType = msg.thread_type.trim();
+    }
+    // Fallback to parsing conversation_link
     if(typeof msg?.conversation_link === 'string') trySetFromLink(msg.conversation_link);
+    // Additional platform detection
     if(!meta.threadType && typeof msg?.platform === 'string'){
       const platform = msg.platform.trim().toLowerCase();
       if(platform.includes('instagram')) meta.threadType = 'IG_MESSAGE';
     }
+    // ID-based detection as last resort
     if(!meta.threadType){
       const fromId = msg?.from?.id;
       const toIds = (msg?.to?.data || []).map(entry => entry?.id);
@@ -486,8 +562,23 @@ function guessThreadMeta(pageId, conversation, messages, existingLink){
     }
   }
 
+  // PRIORITY 2: Check conversation object
+  if(conversation){
+    if(!meta.mailboxId && typeof conversation.mailbox_id === 'string' && conversation.mailbox_id.trim()){
+      meta.mailboxId = conversation.mailbox_id.trim();
+    }
+    if(!meta.threadType && typeof conversation.thread_type === 'string' && conversation.thread_type.trim()){
+      meta.threadType = conversation.thread_type.trim();
+    }
+    if(typeof conversation.link === 'string'){
+      trySetFromLink(conversation.link);
+    }
+  }
+
+  // PRIORITY 3: Parse existing link
   if(existingLink) trySetFromLink(existingLink);
 
+  // PRIORITY 4: Fallback to defaults
   if(!meta.mailboxId){
     const sanitizedPage = pageId ? String(pageId).trim() : '';
     meta.mailboxId = sanitizedPage;
@@ -534,6 +625,15 @@ function buildPostThreads(){
     if(!commentGroups.has(pid)) commentGroups.set(pid, []);
     commentGroups.get(pid).push(comment);
   }
+  // Build reactions map: post_id -> {type: count}
+  const reactionGroups = new Map();
+  for(const reaction of state.data.reactions){
+    const pid = reaction.post_id;
+    if(!pid) continue;
+    if(!reactionGroups.has(pid)) reactionGroups.set(pid, {});
+    const type = reaction.type || 'LIKE';
+    reactionGroups.get(pid)[type] = (reactionGroups.get(pid)[type] || 0) + 1;
+  }
   const rows = [];
   const processed = new Set();
   const postEntries = Array.from(postsById.entries()).sort((a,b)=> timeValueFrom(b[1]) - timeValueFrom(a[1]));
@@ -542,12 +642,25 @@ function buildPostThreads(){
     const updated = pickDateValue(post, "updated_time");
     const author = (post.from && post.from.name) || state.pageInfo.name || "";
     const message = (post.message || post.story || "").replace(/\s+/g, " ").trim();
-    const reactionsRaw = post.reactions_total != null ? post.reactions_total : (post.reactions && post.reactions.summary ? post.reactions.summary.total_count : 0);
     const sharesRaw = post.shares_count != null ? post.shares_count : (post.shares ? post.shares.count : 0);
-    const reactions = Number(reactionsRaw) || 0;
     const shares = Number(sharesRaw) || 0;
     const interactionParts = [];
-    if(reactions) interactionParts.push(`Reaktionen: ${reactions}`);
+
+    // Show detailed reactions if available
+    const reactionDetails = reactionGroups.get(pid);
+    if(reactionDetails && Object.keys(reactionDetails).length > 0){
+      const reactionStr = Object.entries(reactionDetails)
+        .sort((a, b) => b[1] - a[1])
+        .map(([type, count]) => `${type}: ${count}`)
+        .join(' · ');
+      interactionParts.push(reactionStr);
+    } else {
+      // Fallback to total count
+      const reactionsRaw = post.reactions_total != null ? post.reactions_total : (post.reactions && post.reactions.summary ? post.reactions.summary.total_count : 0);
+      const reactions = Number(reactionsRaw) || 0;
+      if(reactions) interactionParts.push(`Reaktionen: ${reactions}`);
+    }
+
     if(shares) interactionParts.push(`Shares: ${shares}`);
     rows.push({
       type: "post",
@@ -679,16 +792,24 @@ function buildConversationThreads(){
       }
     }
 
+    // Priorität: Extrahierte Metadaten aus Python-Script nutzen
+    // 1. Aus Conversation-Objekt (wurde vom Python-Script aktualisiert)
+    // 2. Aus erster Message (falls vorhanden)
+    const extractedFromConv = conv && conv.selected_item_id && typeof conv.selected_item_id === 'string' && conv.selected_item_id.trim();
+    const extractedFromMsg = messages.find(m => m.selected_item_id && typeof m.selected_item_id === 'string' && m.selected_item_id.trim());
+
     const candidateIds = [
-      linkSelectedItemId,
-      conv && conv.selected_item_id,
-      conv && conv.id,
-      id,
+      extractedFromConv, // Priority 1: Conversation object (updated by Python)
+      extractedFromMsg && extractedFromMsg.selected_item_id, // Priority 2: From messages
+      linkSelectedItemId, // Priority 3: From parsed link
+      conv && conv.id, // Priority 4: Conversation ID
+      id, // Priority 5: Thread ID
       messages[0] && messages[0].conversation_id,
       messages[0] && messages[0].id,
     ];
     const selectedItemId = candidateIds.map(sanitizeThreadId).find(Boolean) || '';
 
+    // Metadaten mit Priorität auf Conversation-Objekt (wurde vom Python-Script aktualisiert)
     const meta = guessThreadMeta(pageId, conv, messages, initialLinkCandidate);
     const normalizedLink = buildBusinessInboxLink(pageId, selectedItemId, initialLinkCandidate, meta);
     const snippet = conv && conv.snippet ? conv.snippet : '';
@@ -885,16 +1006,31 @@ function renderConversationThreads(){
 }
 
 async function buildMediaMap(){
-  // Parse manifests/sources.txt for MEDIA lines
+  // Parse manifests/sources.txt for MEDIA, VIDEO, and PHOTO lines
   const mf = [...state.files.entries()].find(([p])=>/manifests\/sources\.txt$/.test(p));
   if(!mf) return; const [, file] = mf; const txt = await file.text();
   const lines = txt.split(/\r?\n/);
   for(const line of lines){
+    // MEDIA lines (images from posts)
     const m = /^MEDIA\s+(\d+_?\d*)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
     if(m){
       const postId = m[1]; const local = m[2];
       if(!state.mediaMap.has(postId)) state.mediaMap.set(postId, []);
       state.mediaMap.get(postId).push(local);
+    }
+    // VIDEO lines (videos from posts)
+    const v = /^VIDEO\s+(\d+_?\d*)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
+    if(v){
+      const postId = v[1]; const local = v[2];
+      if(!state.mediaMap.has(postId)) state.mediaMap.set(postId, []);
+      state.mediaMap.get(postId).push(local);
+    }
+    // PHOTO lines (photos from albums)
+    const p = /^PHOTO\s+([^/]+)\/(\S+)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
+    if(p){
+      const photoId = p[2]; const local = p[3];
+      if(!state.mediaMap.has(photoId)) state.mediaMap.set(photoId, []);
+      state.mediaMap.get(photoId).push(local);
     }
   }
 }
@@ -1022,6 +1158,175 @@ render = function(){
         th.dispatchEvent(ev); // desc
       }
     });
+  });
+
+  // Render albums, photos, events and live videos when their tabs are active
+  renderAlbums();
+  renderPhotos();
+  renderEvents();
+  renderLiveVideos();
+}
+
+function renderAlbums(){
+  $$('#statAlbums').textContent = state.data.albums.length;
+  const totalPhotos = state.data.albums.reduce((sum, a) => sum + (a.count || 0), 0);
+  $$('#statAlbumPhotos').textContent = totalPhotos;
+
+  const container = $$('#albumsView');
+  container.innerHTML = '';
+
+  // Sort albums by created_time descending
+  const sorted = state.data.albums.slice().sort((a, b) => {
+    const ta = new Date(a.created_time || 0).getTime();
+    const tb = new Date(b.created_time || 0).getTime();
+    return tb - ta;
+  });
+
+  sorted.forEach(album => {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const coverUrl = album.cover_photo?.picture || '';
+    const coverHtml = coverUrl ? `<img src="${escapeHtml(coverUrl)}" alt="Cover" style="width:100%;height:150px;object-fit:cover;border-radius:6px;">` : '';
+
+    const linkHtml = album.link ? `<a href="${escapeHtml(album.link)}" target="_blank">Facebook</a>` : '';
+
+    card.innerHTML = `
+      ${coverHtml}
+      <div><strong>${escapeHtml(album.name || 'Unbenanntes Album')}</strong></div>
+      <div class="muted">${escapeHtml(album.description || '')}</div>
+      <div class="muted">${album.count || 0} Fotos • ${fmtDate(album.created_time)}</div>
+      <div class="row">
+        <span class="pill">${escapeHtml(album.type || '')}</span>
+        ${linkHtml}
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function renderPhotos(){
+  $$('#statPhotos').textContent = state.data.photos.length;
+
+  const container = $$('#photosGallery');
+  container.innerHTML = '';
+
+  // Sort photos by created_time descending
+  const sorted = state.data.photos.slice().sort((a, b) => {
+    const ta = new Date(a.created_time || 0).getTime();
+    const tb = new Date(b.created_time || 0).getTime();
+    return tb - ta;
+  }).slice(0, 500); // Limit to 500 for performance
+
+  sorted.forEach(photo => {
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+
+    // Get best quality image
+    const images = photo.images || [];
+    const bestImage = images.length > 0 ? images[images.length - 1] : null;
+    const imgUrl = bestImage?.source || photo.picture || '';
+
+    const linkHtml = photo.link ? `<a href="${escapeHtml(photo.link)}" target="_blank">` : '';
+    const linkClose = photo.link ? '</a>' : '';
+
+    thumb.innerHTML = `
+      ${linkHtml}
+        <img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(photo.name || '')}" loading="lazy">
+      ${linkClose}
+      <div class="muted" style="font-size:11px;">
+        ${escapeHtml(photo.album_name || '')}${photo.name ? ' • ' + photo.name : ''}
+      </div>
+    `;
+    container.appendChild(thumb);
+  });
+}
+
+function renderEvents(){
+  $$('#statEvents').textContent = state.data.events.length;
+  const totalInterested = state.data.events.reduce((sum, e) => sum + (e.interested_count || 0), 0);
+  $$('#statEventsInterested').textContent = totalInterested;
+
+  const tbody = $$('#tblEvents tbody');
+  tbody.innerHTML = '';
+
+  // Sort events by start_time descending (newest first)
+  const sorted = state.data.events.slice().sort((a, b) => {
+    const ta = new Date(a.start_time || 0).getTime();
+    const tb = new Date(b.start_time || 0).getTime();
+    return tb - ta;
+  });
+
+  sorted.forEach(event => {
+    const tr = document.createElement('tr');
+
+    const startTime = fmtDate(event.start_time);
+    const endTime = fmtDate(event.end_time);
+    const name = event.name || 'Unbenanntes Event';
+    const description = (event.description || '').substring(0, 100) + (event.description?.length > 100 ? '...' : '');
+    const place = event.place?.name || event.place || '';
+    const interested = event.interested_count || 0;
+    const attending = event.attending_count || 0;
+    const category = event.category || '';
+
+    let status = '';
+    if(event.is_canceled) status = '🚫 Abgesagt';
+    else if(event.is_online) status = '💻 Online';
+    else status = '✓ Aktiv';
+
+    tr.innerHTML = `
+      <td class="nowrap">${escapeHtml(startTime)}</td>
+      <td class="nowrap">${escapeHtml(endTime)}</td>
+      <td><strong>${escapeHtml(name)}</strong></td>
+      <td class="clip" title="${escapeHtml(event.description || '')}">${escapeHtml(description)}</td>
+      <td>${escapeHtml(place)}</td>
+      <td class="nowrap">${interested}</td>
+      <td class="nowrap">${attending}</td>
+      <td class="nowrap">${escapeHtml(category)}</td>
+      <td class="nowrap">${status}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderLiveVideos(){
+  $$('#statLiveVideos').textContent = state.data.live_videos.length;
+  const totalViews = state.data.live_videos.reduce((sum, v) => sum + (v.total_views || 0), 0);
+  $$('#statLiveVideoViews').textContent = totalViews;
+
+  const tbody = $$('#tblLiveVideos tbody');
+  tbody.innerHTML = '';
+
+  // Sort by created_time descending
+  const sorted = state.data.live_videos.slice().sort((a, b) => {
+    const ta = new Date(a.created_time || 0).getTime();
+    const tb = new Date(b.created_time || 0).getTime();
+    return tb - ta;
+  });
+
+  sorted.forEach(video => {
+    const tr = document.createElement('tr');
+
+    const created = fmtDate(video.created_time);
+    const broadcast = fmtDate(video.broadcast_start_time);
+    const title = video.title || 'Ohne Titel';
+    const description = (video.description || '').substring(0, 80) + (video.description?.length > 80 ? '...' : '');
+    const status = video.status || '';
+    const liveViews = video.live_views || 0;
+    const totalViews = video.total_views || 0;
+    const link = video.permalink_url || '';
+
+    tr.innerHTML = `
+      <td class="nowrap">${escapeHtml(created)}</td>
+      <td class="nowrap">${escapeHtml(broadcast)}</td>
+      <td><strong>${escapeHtml(title)}</strong></td>
+      <td class="clip" title="${escapeHtml(video.description || '')}">${escapeHtml(description)}</td>
+      <td class="nowrap">${escapeHtml(status)}</td>
+      <td class="nowrap">${liveViews}</td>
+      <td class="nowrap">${totalViews}</td>
+      <td class="nowrap">${link ? `<a href="${escapeHtml(link)}" target="_blank">Link</a>` : ''}</td>
+    `;
+    tbody.appendChild(tr);
   });
 }
 

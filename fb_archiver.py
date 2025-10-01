@@ -301,6 +301,32 @@ class FacebookArchiver:
         except Exception as e:
             self.append_sources_manifest(f"WARN details for {post_id}: {e}")
             return {}
+    def get_reactions_for_post(self, post_id: str) -> Iterable[Dict]:
+        """Liefert detaillierte Reaktionen für einen Post (WER hat WIE reagiert)."""
+        fields = ["id", "name", "type"]
+        endpoint = f"{post_id}/reactions"
+        params = {"fields": ",".join(fields), "limit": 100, "summary": "true"}
+        next_url = None
+        while True:
+            if next_url:
+                r = self.session.get(next_url, timeout=60)
+                if r.status_code != 200:
+                    # Wenn Reactions nicht verfügbar sind, leise abbrechen
+                    break
+                data = r.json()
+            else:
+                try:
+                    data = self.graph_get(endpoint, params)
+                except Exception:
+                    # Reactions könnten nicht verfügbar sein
+                    break
+            for reaction in data.get("data", []):
+                yield reaction
+            paging = data.get("paging", {})
+            next_url = paging.get("next")
+            if not next_url:
+                break
+
     def get_comments_for_post(
         self, post_or_comment_id: str, depth: int = 0, parent: Optional[str] = None
     ) -> Iterable[Dict]:
@@ -380,6 +406,156 @@ class FacebookArchiver:
             if not next_url:
                 break
 
+    def get_albums(self) -> Iterable[Dict]:
+        """Liefert alle Alben der Seite zurück."""
+        fields = [
+            "id",
+            "name",
+            "description",
+            "created_time",
+            "updated_time",
+            "link",
+            "count",
+            "type",
+            "cover_photo{id,picture,images}"
+        ]
+        endpoint = f"{self.page_info.id}/albums"
+        params = {"fields": ",".join(fields), "limit": 100}
+        next_url = None
+        with tqdm(desc="Albums", unit="album") as bar:
+            while True:
+                if next_url:
+                    r = self.session.get(next_url, timeout=60)
+                    if r.status_code != 200:
+                        raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                    data = r.json()
+                else:
+                    data = self.graph_get(endpoint, params)
+                for album in data.get("data", []):
+                    bar.update(1)
+                    yield album
+                paging = data.get("paging", {})
+                next_url = paging.get("next")
+                if not next_url:
+                    break
+
+    def get_photos_from_album(self, album_id: str) -> Iterable[Dict]:
+        """Liefert alle Fotos eines Albums."""
+        fields = [
+            "id",
+            "created_time",
+            "updated_time",
+            "name",
+            "picture",
+            "images",
+            "link",
+            "alt_text",
+            "width",
+            "height"
+        ]
+        endpoint = f"{album_id}/photos"
+        params = {"fields": ",".join(fields), "limit": 100}
+        next_url = None
+        while True:
+            if next_url:
+                r = self.session.get(next_url, timeout=60)
+                if r.status_code != 200:
+                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                data = r.json()
+            else:
+                data = self.graph_get(endpoint, params)
+            for photo in data.get("data", []):
+                yield photo
+            paging = data.get("paging", {})
+            next_url = paging.get("next")
+            if not next_url:
+                break
+
+    def get_events(self) -> Iterable[Dict]:
+        """Liefert alle Events der Seite zurück."""
+        fields = [
+            "id",
+            "name",
+            "description",
+            "start_time",
+            "end_time",
+            "updated_time",
+            "event_times",
+            "place",
+            "cover",
+            "attending_count",
+            "declined_count",
+            "interested_count",
+            "maybe_count",
+            "noreply_count",
+            "ticket_uri",
+            "category",
+            "is_canceled",
+            "is_online",
+            "is_page_owned"
+        ]
+        endpoint = f"{self.page_info.id}/events"
+        params = {"fields": ",".join(fields), "limit": 100}
+        next_url = None
+        with tqdm(desc="Events", unit="event") as bar:
+            while True:
+                if next_url:
+                    r = self.session.get(next_url, timeout=60)
+                    if r.status_code != 200:
+                        raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                    data = r.json()
+                else:
+                    data = self.graph_get(endpoint, params)
+                for event in data.get("data", []):
+                    bar.update(1)
+                    yield event
+                paging = data.get("paging", {})
+                next_url = paging.get("next")
+                if not next_url:
+                    break
+
+    def get_live_videos(self) -> Iterable[Dict]:
+        """Liefert alle Live Videos der Seite zurück."""
+        fields = [
+            "id",
+            "title",
+            "description",
+            "created_time",
+            "updated_time",
+            "permalink_url",
+            "video",
+            "status",
+            "live_views",
+            "total_views",
+            "embed_html",
+            "is_reference_only",
+            "broadcast_start_time"
+        ]
+        endpoint = f"{self.page_info.id}/live_videos"
+        params = {"fields": ",".join(fields), "limit": 100}
+        next_url = None
+        with tqdm(desc="Live Videos", unit="video") as bar:
+            while True:
+                if next_url:
+                    r = self.session.get(next_url, timeout=60)
+                    if r.status_code != 200:
+                        raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                    data = r.json()
+                else:
+                    try:
+                        data = self.graph_get(endpoint, params)
+                    except Exception as e:
+                        # Live Videos könnten nicht verfügbar sein
+                        self.append_sources_manifest(f"WARN live_videos endpoint: {e}")
+                        break
+                for video in data.get("data", []):
+                    bar.update(1)
+                    yield video
+                paging = data.get("paging", {})
+                next_url = paging.get("next")
+                if not next_url:
+                    break
+
     def download_media_from_post(self, post: Dict) -> List[Tuple[str, str]]:
         """Gibt Liste (local_path, source_url) zurück für gespeicherte Dateien."""
         saved: List[Tuple[str, str]] = []
@@ -448,6 +624,31 @@ class FacebookArchiver:
             self.append_sources_manifest(f"WARN video source {post_id}: {e}")
         return None
 
+    def download_photo(self, photo: Dict, album_id: str = "") -> Optional[Tuple[str, str]]:
+        """Lädt das Foto in höchster Qualität herunter. Gibt (local_path, source_url) zurück."""
+        # Versuche die beste Auflösung aus images-Array zu finden
+        images = photo.get("images", [])
+        if images:
+            # Sortiere nach Breite (höchste zuerst)
+            sorted_images = sorted(images, key=lambda x: x.get("width", 0), reverse=True)
+            src = sorted_images[0].get("source")
+        else:
+            # Fallback auf picture
+            src = photo.get("picture")
+
+        if not src:
+            return None
+
+        try:
+            local = self._download_stream(src, "images")
+            if local:
+                photo_id = photo.get("id", "unknown")
+                self.append_sources_manifest(f"PHOTO {album_id}/{photo_id} {local} <- {src}")
+                return (local, src)
+        except Exception as e:
+            self.append_sources_manifest(f"WARN photo download failed: {src} - {e}")
+        return None
+
     @staticmethod
     def _guess_ext(content_type: Optional[str]) -> str:
         if not content_type:
@@ -480,8 +681,13 @@ Token-Hinweis: Page Access Token (nicht abgelegt)
 Inhalte:
 - data/posts.jsonl, data/comments.jsonl — maschinelle Rohdaten der Chronik
 - data/posts.csv, data/comments.csv — Übersicht (comments.csv inkl. depth/parent_id)
+- data/reactions.jsonl, data/reactions.csv — Detaillierte Reaktionen (WER hat WIE reagiert)
 - data/conversations.jsonl, data/messages.jsonl — Inbox-Rohdaten (falls Rechte vorhanden)
 - data/conversations.csv, data/messages.csv — Übersicht der Konversationen und Nachrichten
+- data/albums.jsonl, data/albums.csv — Alben der Seite
+- data/photos.jsonl, data/photos.csv — Fotos aus Alben (inkl. Metadaten)
+- data/events.jsonl, data/events.csv — Events/Veranstaltungen der Seite
+- data/live_videos.jsonl, data/live_videos.csv — Live Videos der Seite
 - media/images, media/videos — heruntergeladene Medien (best effort)
 - manifests/checksums.sha256 — Prüfsummen aller Dateien
 - manifests/sources.txt — API-Endpunkte & Parameter / Warnungen
@@ -529,8 +735,10 @@ Hinweise:
         comments_jsonl = open(
             self.path("data", "comments.jsonl"), "w", encoding="utf-8"
         )
+        reactions_jsonl = open(self.path("data", "reactions.jsonl"), "w", encoding="utf-8")
         posts_rows: List[Dict] = []
         comments_rows: List[Dict] = []
+        reactions_rows: List[Dict] = []
 
         def normalize_str(value: Optional[str]) -> Optional[str]:
             if value is None:
@@ -597,15 +805,35 @@ Hinweise:
                     comments_jsonl.write(json.dumps(c, ensure_ascii=False) + "\n")
             except Exception as e:
                 self.append_sources_manifest(f"WARN comments for {pid}: {e}")
-    
+
+            # Reaktions-Details holen (WER hat WIE reagiert)
+            try:
+                for reaction in self.get_reactions_for_post(pid):
+                    reaction["post_id"] = pid
+                    reactions_jsonl.write(json.dumps(reaction, ensure_ascii=False) + "\n")
+                    reactions_rows.append({
+                        "post_id": pid,
+                        "user_id": reaction.get("id"),
+                        "user_name": reaction.get("name"),
+                        "type": reaction.get("type")  # LIKE, LOVE, WOW, HAHA, SAD, ANGRY, THANKFUL
+                    })
+            except Exception as e:
+                self.append_sources_manifest(f"WARN reactions for {pid}: {e}")
+
             # Medien (best effort)
             if self.media:
                 saved = self.download_media_from_post(post)
                 for local, src in saved:
                     self.append_sources_manifest(f"MEDIA {pid} {local} <- {src}")
-    
+
         posts_jsonl.close()
         comments_jsonl.close()
+        reactions_jsonl.close()
+
+        if reactions_rows:
+            pd.DataFrame(reactions_rows).to_csv(
+                self.path("data", "reactions.csv"), index=False
+            )
     
         # Inbox-Konversationen archivieren
         conv_jsonl = open(
@@ -643,24 +871,9 @@ Hinweise:
                         return
 
                 update_meta_from_link(conv_link)
-                conv_jsonl.write(json.dumps(conv, ensure_ascii=False) + "\n")
-                conv_row = {
-                    "conversation_id": conv_id,
-                    "updated_time": iso8601(conv.get("updated_time")),
-                    "link": conv_link,
-                    "mailbox_id": mailbox_id,
-                    "thread_type": thread_type,
-                    "selected_item_id": selected_item_id,
-                    "participants": ", ".join(
-                        [
-                            p.get("name")
-                            for p in (conv.get("participants", {}).get("data", []))
-                        ]
-                    ),
-                }
-                conv_rows.append(conv_row)
 
-                # Nachrichten innerhalb der Konversation
+                # Nachrichten innerhalb der Konversation verarbeiten um Metadaten zu sammeln
+                messages_to_write = []
                 for msg in self.get_messages(conv_id):
                     msg.setdefault("conversation_id", conv_id)
                     if conv_link:
@@ -686,10 +899,37 @@ Hinweise:
                     if selected_item_id:
                         msg.setdefault("selected_item_id", selected_item_id)
 
-                    conv_row["mailbox_id"] = mailbox_id
-                    conv_row["thread_type"] = thread_type
-                    conv_row["selected_item_id"] = selected_item_id
+                    messages_to_write.append(msg)
 
+                # Extrahierte Metadaten zurück in Conversation-Objekt schreiben
+                if mailbox_id:
+                    conv.setdefault("mailbox_id", mailbox_id)
+                if thread_type:
+                    conv.setdefault("thread_type", thread_type)
+                if selected_item_id:
+                    conv.setdefault("selected_item_id", selected_item_id)
+
+                # JETZT erst das Conversation-Objekt mit aktualisierten Metadaten schreiben
+                conv_jsonl.write(json.dumps(conv, ensure_ascii=False) + "\n")
+
+                conv_row = {
+                    "conversation_id": conv_id,
+                    "updated_time": iso8601(conv.get("updated_time")),
+                    "link": conv_link,
+                    "mailbox_id": mailbox_id,
+                    "thread_type": thread_type,
+                    "selected_item_id": selected_item_id,
+                    "participants": ", ".join(
+                        [
+                            p.get("name")
+                            for p in (conv.get("participants", {}).get("data", []))
+                        ]
+                    ),
+                }
+                conv_rows.append(conv_row)
+
+                # Messages mit aktualisierten Metadaten schreiben
+                for msg in messages_to_write:
                     msg_jsonl.write(json.dumps(msg, ensure_ascii=False) + "\n")
                     msg_rows.append(
                         {
@@ -719,10 +959,10 @@ Hinweise:
                     )
         except Exception as e:
             self.append_sources_manifest(f"WARN conversations/messages: {e}")
-    
+
         conv_jsonl.close()
         msg_jsonl.close()
-    
+
         if conv_rows:
             pd.DataFrame(conv_rows).to_csv(
                 self.path("data", "conversations.csv"), index=False
@@ -731,7 +971,156 @@ Hinweise:
             pd.DataFrame(msg_rows).to_csv(
                 self.path("data", "messages.csv"), index=False
             )
-    
+
+        # Alben und Fotos archivieren
+        albums_jsonl = open(self.path("data", "albums.jsonl"), "w", encoding="utf-8")
+        photos_jsonl = open(self.path("data", "photos.jsonl"), "w", encoding="utf-8")
+        albums_rows: List[Dict] = []
+        photos_rows: List[Dict] = []
+
+        try:
+            for album in self.get_albums():
+                album_id = album.get("id")
+                album_name = album.get("name", "")
+
+                # Album-Metadaten speichern
+                albums_jsonl.write(json.dumps(album, ensure_ascii=False) + "\n")
+                albums_rows.append({
+                    "album_id": album_id,
+                    "name": album_name,
+                    "description": (album.get("description") or "").replace("\n", " ").strip(),
+                    "created_time": iso8601(album.get("created_time")),
+                    "updated_time": iso8601(album.get("updated_time")),
+                    "link": album.get("link"),
+                    "photo_count": album.get("count", 0),
+                    "type": album.get("type", "")
+                })
+
+                # Fotos des Albums holen
+                try:
+                    for photo in self.get_photos_from_album(album_id):
+                        photo["album_id"] = album_id
+                        photo["album_name"] = album_name
+
+                        photos_jsonl.write(json.dumps(photo, ensure_ascii=False) + "\n")
+                        photos_rows.append({
+                            "album_id": album_id,
+                            "album_name": album_name,
+                            "photo_id": photo.get("id"),
+                            "created_time": iso8601(photo.get("created_time")),
+                            "name": (photo.get("name") or "").replace("\n", " ").strip(),
+                            "alt_text": (photo.get("alt_text") or "").replace("\n", " ").strip(),
+                            "link": photo.get("link"),
+                            "width": photo.get("width"),
+                            "height": photo.get("height")
+                        })
+
+                        # Foto herunterladen
+                        if self.media:
+                            result = self.download_photo(photo, album_id)
+                            if result:
+                                local, src = result
+                                # Update photos_rows mit lokalem Pfad
+                                if photos_rows:
+                                    photos_rows[-1]["local_path"] = local
+
+                except Exception as e:
+                    self.append_sources_manifest(f"WARN photos for album {album_id}: {e}")
+
+        except Exception as e:
+            self.append_sources_manifest(f"WARN albums: {e}")
+
+        albums_jsonl.close()
+        photos_jsonl.close()
+
+        if albums_rows:
+            pd.DataFrame(albums_rows).to_csv(
+                self.path("data", "albums.csv"), index=False
+            )
+        if photos_rows:
+            pd.DataFrame(photos_rows).to_csv(
+                self.path("data", "photos.csv"), index=False
+            )
+
+        # Events archivieren
+        events_jsonl = open(self.path("data", "events.jsonl"), "w", encoding="utf-8")
+        events_rows: List[Dict] = []
+
+        try:
+            for event in self.get_events():
+                event_id = event.get("id")
+
+                # Event-Metadaten speichern
+                events_jsonl.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+                # Location extrahieren
+                place = event.get("place", {})
+                location_name = place.get("name", "") if isinstance(place, dict) else ""
+
+                events_rows.append({
+                    "event_id": event_id,
+                    "name": event.get("name", ""),
+                    "description": (event.get("description") or "").replace("\n", " ").strip(),
+                    "start_time": iso8601(event.get("start_time")),
+                    "end_time": iso8601(event.get("end_time")),
+                    "updated_time": iso8601(event.get("updated_time")),
+                    "location": location_name,
+                    "attending_count": event.get("attending_count", 0),
+                    "interested_count": event.get("interested_count", 0),
+                    "declined_count": event.get("declined_count", 0),
+                    "category": event.get("category", ""),
+                    "is_canceled": event.get("is_canceled", False),
+                    "is_online": event.get("is_online", False),
+                    "ticket_uri": event.get("ticket_uri", "")
+                })
+
+        except Exception as e:
+            self.append_sources_manifest(f"WARN events: {e}")
+
+        events_jsonl.close()
+
+        if events_rows:
+            pd.DataFrame(events_rows).to_csv(
+                self.path("data", "events.csv"), index=False
+            )
+
+        # Live Videos archivieren
+        live_videos_jsonl = open(self.path("data", "live_videos.jsonl"), "w", encoding="utf-8")
+        live_videos_rows: List[Dict] = []
+
+        try:
+            for video in self.get_live_videos():
+                video_id = video.get("id")
+
+                # Live Video-Metadaten speichern
+                live_videos_jsonl.write(json.dumps(video, ensure_ascii=False) + "\n")
+
+                # Video-Objekt extrahieren
+                video_data = video.get("video", {}) if isinstance(video.get("video"), dict) else {}
+
+                live_videos_rows.append({
+                    "video_id": video_id,
+                    "title": video.get("title", ""),
+                    "description": (video.get("description") or "").replace("\n", " ").strip(),
+                    "created_time": iso8601(video.get("created_time")),
+                    "broadcast_start_time": iso8601(video.get("broadcast_start_time")),
+                    "status": video.get("status", ""),
+                    "live_views": video.get("live_views", 0),
+                    "total_views": video.get("total_views", 0),
+                    "permalink_url": video.get("permalink_url", ""),
+                    "video_source": video_data.get("source", "") if video_data else ""
+                })
+
+        except Exception as e:
+            self.append_sources_manifest(f"WARN live_videos: {e}")
+
+        live_videos_jsonl.close()
+
+        if live_videos_rows:
+            pd.DataFrame(live_videos_rows).to_csv(
+                self.path("data", "live_videos.csv"), index=False
+            )
+
         # CSV schreiben
         if posts_rows:
             pd.DataFrame(posts_rows).to_csv(self.path("data", "posts.csv"), index=False)
@@ -739,10 +1128,10 @@ Hinweise:
             pd.DataFrame(comments_rows).to_csv(
                 self.path("data", "comments.csv"), index=False
             )
-    
+
         # Checksums
         self.write_checksums()
-    
+
         print(f"Fertig. Archiv unter: {self.outdir}")
     
     
@@ -797,22 +1186,44 @@ def run_split_by_years(args):
         limit=args.limit,
     )
     page_info = base_arch.get_page_info()
-    first_date = detect_first_post_date(args.page, args.access_token)
-    start_year = int(first_date.split("-")[0])
-    end_year = datetime.datetime.now(timezone.utc).year
+
+    # Bestimme Start- und Endjahr unter Berücksichtigung der User-Parameter
+    if args.since:
+        # User hat --since angegeben: verwende dieses Jahr als Start
+        start_year = int(args.since.split("-")[0])
+    else:
+        # Kein --since: Ermittle ältesten Post
+        first_date = detect_first_post_date(args.page, args.access_token)
+        start_year = int(first_date.split("-")[0])
+
+    if args.until:
+        # User hat --until angegeben: verwende dieses Jahr als Ende
+        end_year = int(args.until.split("-")[0])
+    else:
+        # Kein --until: verwende aktuelles Jahr
+        end_year = datetime.datetime.now(timezone.utc).year
+
     print(f"[INFO] Archivierung von {start_year} bis {end_year} für {page_info.name}")
 
     for year in range(start_year, end_year + 1):
-        since = f"{year}-01-01"
-        until = f"{year}-12-31"
+        # Bestimme Jahresgrenzen, aber respektiere User-Parameter
+        year_since = f"{year}-01-01"
+        year_until = f"{year}-12-31"
+
+        # Falls User spezifische Grenzen gesetzt hat, diese innerhalb des Jahres anwenden
+        if args.since and year == start_year:
+            year_since = args.since
+        if args.until and year == end_year:
+            year_until = args.until
+
         year_out = str(Path(args.out) / str(year))
-        print(f"[INFO] -> Jahr {year} ({since} bis {until})")
+        print(f"[INFO] -> Jahr {year} ({year_since} bis {year_until})")
         arch = FacebookArchiver(
             page=args.page,
             access_token=args.access_token,
             outdir=year_out,
-            since=since,
-            until=until,
+            since=year_since,
+            until=year_until,
             media=not args.no_media,
             limit=args.limit,
         )
