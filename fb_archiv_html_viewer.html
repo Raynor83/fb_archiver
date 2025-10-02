@@ -124,7 +124,7 @@
           <div class="stat"><div class="kicker">Zeitraum</div><div class="n" id="statRange">–</div></div>
         </div>
         <div class="table-wrap scroll-x"><table id="tblPostThreads"><thead><tr>
-          <th>Datum</th><th>Typ</th><th>Post-ID</th><th>Kommentar-ID</th><th>Autor</th><th>Ebene</th><th>Interaktion</th><th>Text</th><th>Permalink</th>
+          <th>Datum</th><th>Typ</th><th>Post-ID</th><th>Kommentar-ID</th><th>Autor</th><th>Ebene</th><th>Interaktion</th><th>Text</th><th>Medien</th><th>Permalink</th>
         </tr></thead><tbody></tbody></table></div>
       </section>
 
@@ -164,9 +164,7 @@
           <div class="stat"><div class="kicker">Anzahl Live Videos</div><div class="n" id="statLiveVideos">0</div></div>
           <div class="stat"><div class="kicker">Gesamt-Views</div><div class="n" id="statLiveVideoViews">0</div></div>
         </div>
-        <div class="table-wrap scroll-x"><table id="tblLiveVideos"><thead><tr>
-          <th>Erstellt</th><th>Broadcast Start</th><th>Titel</th><th>Beschreibung</th><th>Status</th><th>Live Views</th><th>Total Views</th><th>Link</th>
-        </tr></thead><tbody></tbody></table></div>
+        <div id="liveVideosContainer"></div>
       </section>
 
       <section data-panel="media" class="panel" hidden>
@@ -962,6 +960,28 @@ function renderPostThreads(){
     const authorClip = row.author ? `<div class="clip">${escapeHtml(row.author)}</div>` : '';
     const interactionClip = row.interaction ? `<div class="clip">${escapeHtml(row.interaction)}</div>` : '';
     const messageCell = `<div class="clip" title="${escapeHtml(row.message || '')}">${messageHtml}</div>`;
+
+    // Build media cell (videos and images)
+    let mediaCell = '';
+    if(row.type === 'post' && row.post_id){
+      const mediaFiles = state.mediaMap.get(row.post_id) || [];
+      if(mediaFiles.length > 0){
+        const mediaHtml = mediaFiles.map(path => {
+          const fileName = path.split('/').pop();
+          const fileObj = state.files.get(path);
+          if(!fileObj) return '';
+          const url = URL.createObjectURL(fileObj);
+          const isVideo = /\.(mp4|webm)$/i.test(path);
+          if(isVideo){
+            return `<video src="${url}" controls muted style="max-width:200px;max-height:100px;"></video>`;
+          } else {
+            return `<img src="${url}" alt="${escapeHtml(fileName)}" style="max-width:200px;max-height:100px;object-fit:cover;">`;
+          }
+        }).filter(Boolean).join(' ');
+        mediaCell = `<div class="row" style="gap:4px;">${mediaHtml}</div>`;
+      }
+    }
+
     tr.innerHTML = `
       <td data-ts="${escapeHtml(dateValue)}" class="col-date nowrap">${escapeHtml(fmtDate(dateValue))}</td>
       <td class="col-type nowrap">${escapeHtml(typeLabel)}</td>
@@ -971,6 +991,7 @@ function renderPostThreads(){
       <td class="col-depth nowrap">${escapeHtml(depthValue)}</td>
       <td class="col-interaction nowrap">${interactionClip}</td>
       <td class="col-text">${messageCell}</td>
+      <td class="col-media nowrap">${mediaCell}</td>
       <td class="col-link nowrap">${row.permalink_url ? `<a target="_blank" href="${escapeHtml(row.permalink_url)}">Link</a>` : ''}</td>`;
     tbody.appendChild(tr);
   });
@@ -1294,8 +1315,8 @@ function renderLiveVideos(){
   const totalViews = state.data.live_videos.reduce((sum, v) => sum + (v.total_views || 0), 0);
   $$('#statLiveVideoViews').textContent = totalViews;
 
-  const tbody = $$('#tblLiveVideos tbody');
-  tbody.innerHTML = '';
+  const container = $$('#liveVideosContainer');
+  container.innerHTML = '';
 
   // Sort by created_time descending
   const sorted = state.data.live_videos.slice().sort((a, b) => {
@@ -1305,29 +1326,43 @@ function renderLiveVideos(){
   });
 
   sorted.forEach(video => {
-    const tr = document.createElement('tr');
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.marginBottom = '16px';
 
     const created = fmtDate(video.created_time);
     const broadcast = fmtDate(video.broadcast_start_time);
     const title = video.title || 'Ohne Titel';
-    const description = (video.description || '').substring(0, 80) + (video.description?.length > 80 ? '...' : '');
+    const description = video.description || '';
     const status = video.status || '';
     const liveViews = video.live_views || 0;
     const totalViews = video.total_views || 0;
     const link = video.permalink_url || '';
 
-    tr.innerHTML = `
-      <td class="nowrap">${escapeHtml(created)}</td>
-      <td class="nowrap">${escapeHtml(broadcast)}</td>
-      <td><strong>${escapeHtml(title)}</strong></td>
-      <td class="clip" title="${escapeHtml(video.description || '')}">${escapeHtml(description)}</td>
-      <td class="nowrap">${escapeHtml(status)}</td>
-      <td class="nowrap">${liveViews}</td>
-      <td class="nowrap">${totalViews}</td>
-      <td class="nowrap">${link ? `<a href="${escapeHtml(link)}" target="_blank">Link</a>` : ''}</td>
+    // Try to get embed_html or video source
+    let videoPreview = '';
+    if(video.embed_html){
+      videoPreview = video.embed_html;
+    } else if(video.video && video.video.source){
+      const videoUrl = video.video.source;
+      videoPreview = `<video src="${escapeHtml(videoUrl)}" controls style="width:100%;max-width:600px;border-radius:8px;"></video>`;
+    } else if(link){
+      videoPreview = `<a href="${escapeHtml(link)}" target="_blank" class="btn">Video auf Facebook ansehen</a>`;
+    }
+
+    card.innerHTML = `
+      <div><strong style="font-size:16px;">${escapeHtml(title)}</strong></div>
+      <div class="muted">Erstellt: ${escapeHtml(created)} • Broadcast: ${escapeHtml(broadcast)}</div>
+      <div class="muted">Status: ${escapeHtml(status)} • Live Views: ${liveViews} • Total Views: ${totalViews}</div>
+      ${description ? `<div style="margin-top:8px;">${escapeHtml(description)}</div>` : ''}
+      <div style="margin-top:12px;">${videoPreview}</div>
     `;
-    tbody.appendChild(tr);
+    container.appendChild(card);
   });
+
+  if(sorted.length === 0){
+    container.innerHTML = '<div class="muted">Keine Live Videos gefunden.</div>';
+  }
 }
 
 </script>
