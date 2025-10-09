@@ -306,9 +306,9 @@ async function loadFromDirectory(){
   }catch(e){ console.warn('Subdir scan failed', e); }
 
   await parseAll();
+  await buildMediaMap();
   render();
   renderManifests();
-  await buildMediaMap();
   await renderMediaGallery();
 }
 
@@ -1105,6 +1105,8 @@ render();
 // --- Tabellen-Sortierung ---
 function makeTablesSortable(){
   document.querySelectorAll("table").forEach(table => {
+    if(table.dataset.sortableReady) return;
+    table.dataset.sortableReady = "1";
     const headers = table.querySelectorAll("th");
     headers.forEach((th, idx) => {
       th.style.cursor = "pointer";
