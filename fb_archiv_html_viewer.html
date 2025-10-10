@@ -415,6 +415,20 @@ async function parseAll(){
       if(u){ if(!state.dateRange.to || u > state.dateRange.to) state.dateRange.to = u; }
     }
   }
+
+  state.data.posts = dedupeByKey(state.data.posts, row => row?.id || row?.post_id || '');
+  state.data.comments = dedupeByKey(state.data.comments, row => row?.id || row?.comment_id || '');
+  state.data.conversations = dedupeByKey(state.data.conversations, row => row?.id || row?.conversation_id || '');
+  state.data.messages = dedupeByKey(state.data.messages, row => row?.id || row?.message_id || '');
+  state.data.albums = dedupeByKey(state.data.albums, row => row?.id || '');
+  state.data.photos = dedupeByKey(state.data.photos, row => row?.id || '');
+  state.data.events = dedupeByKey(state.data.events, row => row?.id || '');
+  state.data.reactions = dedupeByKey(
+    state.data.reactions,
+    row => row ? `${row.post_id || ''}:${row.id || ''}:${row.type || ''}` : ''
+  );
+  state.data.live_videos = dedupeByKey(state.data.live_videos, row => row?.id || '');
+
   buildPostThreads();
   buildConversationThreads();
   updateHeaderInfo();
@@ -516,6 +530,96 @@ function sanitizeThreadId(value){
   let thread = String(value).trim();
   if(thread.startsWith('t_')) thread = thread.slice(2);
   return thread;
+}
+
+function preferLatestRecord(existing, candidate){
+  if(!existing) return candidate;
+  if(!candidate) return existing;
+  const existingUpdated = timeValueFrom(existing, "updated_time");
+  const candidateUpdated = timeValueFrom(candidate, "updated_time");
+  if(candidateUpdated > existingUpdated) return candidate;
+  if(candidateUpdated < existingUpdated) return existing;
+  const existingCreated = timeValueFrom(existing, "created_time");
+  const candidateCreated = timeValueFrom(candidate, "created_time");
+  if(candidateCreated > existingCreated) return candidate;
+  if(candidateCreated < existingCreated) return existing;
+  const existingDetail = existing ? Object.keys(existing).length : 0;
+  const candidateDetail = candidate ? Object.keys(candidate).length : 0;
+  return candidateDetail > existingDetail ? candidate : existing;
+}
+
+function dedupeByKey(items, getKey, prefer = preferLatestRecord){
+  if(!Array.isArray(items)) return [];
+  const map = new Map();
+  const withoutKey = [];
+  for(const item of items){
+    let key = '';
+    try{
+      key = getKey(item);
+    }catch{
+      key = '';
+    }
+    if(key == null || key === ''){
+      withoutKey.push(item);
+      continue;
+    }
+    const keyStr = String(key);
+    if(map.has(keyStr)){
+      const chosen = prefer(map.get(keyStr), item) || map.get(keyStr);
+      map.set(keyStr, chosen);
+    }else{
+      map.set(keyStr, item);
+    }
+  }
+  return [...map.values(), ...withoutKey];
+}
+
+function messageDedupeKey(msg, convId){
+  const primary = sanitizeThreadId(msg?.id || msg?.message_id || msg?.mid || msg?.messageId);
+  if(primary) return `id:${convId}:${primary}`;
+  const created = pickDateValue(msg, "created_time") || '';
+  const fromName = (msg?.from && msg.from.name) ? msg.from.name : '';
+  const text = typeof msg?.message === 'string' ? msg.message.trim().slice(0, 160) : '';
+  return `fallback:${convId}:${created}:${fromName}:${text}`;
+}
+
+function hasMeaningfulValue(value){
+  if(value == null) return false;
+  if(typeof value === 'string') return value.trim().length > 0;
+  if(Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function mergeMessageRecords(target, source){
+  if(!target || !source || typeof target !== 'object' || typeof source !== 'object'){
+    return target || source;
+  }
+  if(typeof source.message === 'string'){
+    const currentLen = typeof target.message === 'string' ? target.message.length : 0;
+    if(source.message.length > currentLen){
+      target.message = source.message;
+    }
+  }
+  const preferKeys = ['conversation_link','mailbox_id','thread_type','selected_item_id','platform'];
+  for(const key of preferKeys){
+    if(!hasMeaningfulValue(target[key]) && hasMeaningfulValue(source[key])){
+      target[key] = source[key];
+    }
+  }
+  if(hasMeaningfulValue(source.attachments)){
+    if(!hasMeaningfulValue(target.attachments)){
+      target.attachments = source.attachments;
+    }else{
+      target.attachments = [].concat(target.attachments, source.attachments);
+    }
+  }
+  if(!hasMeaningfulValue(target.to) && hasMeaningfulValue(source.to)){
+    target.to = source.to;
+  }
+  if(!hasMeaningfulValue(target.from) && hasMeaningfulValue(source.from)){
+    target.from = source.from;
+  }
+  return target;
 }
 
 function guessThreadMeta(pageId, conversation, messages, existingLink){
@@ -745,31 +849,56 @@ function buildConversationThreads(){
   const pageId = state.pageInfo && state.pageInfo.id ? state.pageInfo.id : '';
   const convById = new Map();
   for(const conv of state.data.conversations){
-    const id = conv.id || conv.conversation_id;
-    if(!id) continue;
+    const rawId = conv.id || conv.conversation_id;
+    if(!rawId) continue;
+    const id = String(rawId);
     if(!convById.has(id) || timeValueFrom(conv, "updated_time") > timeValueFrom(convById.get(id), "updated_time")){
       convById.set(id, conv);
     }
   }
   const msgGroups = new Map();
+  // Deduplicate messages per conversation because year-sliced archives repeat older history
   for(const msg of state.data.messages){
     const convId = msg.conversation_id || msg.thread_id || msg.id || null;
     if(!convId) continue;
-    if(!msgGroups.has(convId)) msgGroups.set(convId, []);
-    msgGroups.get(convId).push(msg);
+    const bucketKey = String(convId);
+    if(!msgGroups.has(bucketKey)){
+      msgGroups.set(bucketKey, new Map());
+    }
+    const bucket = msgGroups.get(bucketKey);
+    const dedupeKey = messageDedupeKey(msg, bucketKey);
+    if(bucket.has(dedupeKey)){
+      mergeMessageRecords(bucket.get(dedupeKey), msg);
+    }else{
+      bucket.set(dedupeKey, { ...msg });
+    }
   }
-  const allIds = new Set([...convById.keys(), ...msgGroups.keys()]);
+  const allIds = new Set([
+    ...Array.from(convById.keys(), key => String(key)),
+    ...Array.from(msgGroups.keys(), key => String(key)),
+  ]);
   const rows = [];
   const sortedIds = Array.from(allIds).sort((a,b)=>{
     const convA = convById.get(a);
     const convB = convById.get(b);
-    const timeA = Math.max(timeValueFrom(convA, "updated_time"), latestMessageTime(msgGroups.get(a)));
-    const timeB = Math.max(timeValueFrom(convB, "updated_time"), latestMessageTime(msgGroups.get(b)));
+    const groupA = msgGroups.get(String(a));
+    const groupB = msgGroups.get(String(b));
+    const timeA = Math.max(
+      timeValueFrom(convA, "updated_time"),
+      latestMessageTime(groupA ? Array.from(groupA.values()) : [])
+    );
+    const timeB = Math.max(
+      timeValueFrom(convB, "updated_time"),
+      latestMessageTime(groupB ? Array.from(groupB.values()) : [])
+    );
     return timeB - timeA;
   });
   for(const id of sortedIds){
     const conv = convById.get(id);
-    const messages = (msgGroups.get(id) || []).slice().sort((a,b)=> timeValueFrom(a, "created_time") - timeValueFrom(b, "created_time"));
+    const group = msgGroups.get(String(id));
+    const messages = group
+      ? Array.from(group.values()).sort((a,b)=> timeValueFrom(a, "created_time") - timeValueFrom(b, "created_time"))
+      : [];
     const convTime = pickDateValue(conv, "updated_time") || pickDateValue(conv, "created_time") || pickDateValue(messages[0], "created_time");
     const participantList = conv && conv.participants && conv.participants.data ? conv.participants.data : [];
     const participants = participantList.map(p=>p.name).join(", ") || gatherParticipantsFromMessages(messages);

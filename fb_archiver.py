@@ -99,8 +99,9 @@ import os
 import re
 import sys
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
@@ -149,6 +150,56 @@ def iso8601(dt: Optional[str]) -> Optional[str]:
         return dt
 
 
+def parse_to_utc(dt_str: Optional[str]) -> Optional[datetime]:
+    if not dt_str:
+        return None
+    try:
+        dt = dtparse.parse(dt_str)
+    except Exception:
+        return None
+    if getattr(dt, "tzinfo", None) is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt
+
+
+def prefer_latest_record(
+    existing: Optional[Dict],
+    candidate: Optional[Dict],
+    time_keys: Tuple[str, ...] = ("updated_time", "created_time", "timestamp"),
+) -> Optional[Dict]:
+    if not existing:
+        return candidate
+    if not candidate:
+        return existing
+
+    def stamp(item: Dict) -> Optional[datetime]:
+        for key in time_keys:
+            if key in item:
+                ts = parse_to_utc(item.get(key))
+                if ts:
+                    return ts
+        return None
+
+    existing_ts = stamp(existing)
+    candidate_ts = stamp(candidate)
+
+    if existing_ts and candidate_ts:
+        if candidate_ts > existing_ts:
+            return candidate
+        if candidate_ts < existing_ts:
+            return existing
+    elif candidate_ts and not existing_ts:
+        return candidate
+    elif existing_ts and not candidate_ts:
+        return existing
+
+    existing_len = len(existing) if isinstance(existing, dict) else 0
+    candidate_len = len(candidate) if isinstance(candidate, dict) else 0
+    return candidate if candidate_len > existing_len else existing
+
+
 def safe_filename(name: str) -> str:
     name = name.strip().replace(" ", "_")
     return re.sub(r"[^A-Za-z0-9_.-]", "-", name)[:200]
@@ -182,6 +233,15 @@ class FacebookArchiver:
         self.until = until
         self.media = media
         self.limit = limit
+
+        self._since_dt = parse_to_utc(self.since)
+        self._until_dt = parse_to_utc(self.until)
+        self._until_cutoff = None
+        if self._until_dt:
+            if self._until_dt.time() == datetime.min.time():
+                self._until_cutoff = self._until_dt + timedelta(days=1)
+            else:
+                self._until_cutoff = self._until_dt
 
         os.makedirs(self.outdir, exist_ok=True)
         os.makedirs(self.path("data"), exist_ok=True)
@@ -224,6 +284,18 @@ class FacebookArchiver:
 
             # Alle anderen Fehler sofort abbrechen
             raise RuntimeError(f"Graph API error {r.status_code}: {r.text}")
+
+    def _is_within_requested_range(self, dt_str: Optional[str]) -> bool:
+        if not dt_str:
+            return True
+        dt = parse_to_utc(dt_str)
+        if not dt:
+            return True
+        if self._since_dt and dt < self._since_dt:
+            return False
+        if self._until_cutoff and dt >= self._until_cutoff:
+            return False
+        return True
 
     def get_page_info(self) -> PageInfo:
         data = self.graph_get(self.page, {"fields": "id,name,link"})
@@ -472,7 +544,7 @@ class FacebookArchiver:
                 break
 
     def get_events(self) -> Iterable[Dict]:
-        """Liefert alle Events der Seite zurück."""
+        """Liefert alle Events der Seite zurück (Vergangenheit & Zukunft)."""
         fields = [
             "id",
             "name",
@@ -495,33 +567,47 @@ class FacebookArchiver:
             "is_page_owned",
         ]
         endpoint = f"{self.page_info.id}/events"
-        params = {
+        base_params = {
             "fields": ",".join(fields),
             "limit": self.limit,
-            "time_filter": "all",
             "include_canceled": True,
         }
         if self.since:
-            params["since"] = to_utc_epoch(self.since)
+            base_params["since"] = to_utc_epoch(self.since)
         if self.until:
-            params["until"] = to_utc_epoch(self.until)
-        next_url = None
+            base_params["until"] = to_utc_epoch(self.until)
+
+        seen_ids: set[str] = set()
+        filters = ["upcoming", "past"]
         with tqdm(desc="Events", unit="event") as bar:
-            while True:
-                if next_url:
-                    r = self.session.get(next_url, timeout=60)
-                    if r.status_code != 200:
-                        raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                    data = r.json()
-                else:
-                    data = self.graph_get(endpoint, params)
-                for event in data.get("data", []):
-                    bar.update(1)
-                    yield event
-                paging = data.get("paging", {})
-                next_url = paging.get("next")
-                if not next_url:
-                    break
+            for time_filter in filters:
+                params = dict(base_params)
+                params["time_filter"] = time_filter
+                next_url = None
+                while True:
+                    if next_url:
+                        r = self.session.get(next_url, timeout=60)
+                        if r.status_code != 200:
+                            raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                        data = r.json()
+                    else:
+                        try:
+                            data = self.graph_get(endpoint, params)
+                        except RuntimeError as exc:
+                            # Wenn der Filter nicht unterstützt wird, loggen und abbrechen
+                            self.append_sources_manifest(f"WARN events ({time_filter}): {exc}")
+                            break
+                    for event in data.get("data", []):
+                        eid = event.get("id")
+                        if not eid or eid in seen_ids:
+                            continue
+                        seen_ids.add(eid)
+                        bar.update(1)
+                        yield event
+                    paging = data.get("paging", {})
+                    next_url = paging.get("next")
+                    if not next_url:
+                        break
 
     def get_live_videos(self) -> Iterable[Dict]:
         """Liefert alle Live Videos der Seite zurück."""
@@ -745,9 +831,12 @@ Hinweise:
             self.path("data", "comments.jsonl"), "w", encoding="utf-8"
         )
         reactions_jsonl = open(self.path("data", "reactions.jsonl"), "w", encoding="utf-8")
-        posts_rows: List[Dict] = []
-        comments_rows: List[Dict] = []
-        reactions_rows: List[Dict] = []
+        post_records: "OrderedDict[str, Dict]" = OrderedDict()
+        comment_records: "OrderedDict[str, Dict]" = OrderedDict()
+        reaction_records: "OrderedDict[str, Dict]" = OrderedDict()
+        posts_rows_map: "OrderedDict[str, Dict]" = OrderedDict()
+        comments_rows_map: "OrderedDict[str, Dict]" = OrderedDict()
+        reactions_rows_map: "OrderedDict[str, Dict]" = OrderedDict()
 
         def normalize_str(value: Optional[str]) -> Optional[str]:
             if value is None:
@@ -757,6 +846,79 @@ Hinweise:
 
         def sanitize_thread_id(value: Optional[str]) -> Optional[str]:
             return normalize_str(value[2:]) if (isinstance(value, str) and value.startswith('t_')) else normalize_str(value)
+
+        def store_record(
+            store: "OrderedDict[str, Dict]",
+            key: Optional[str],
+            candidate: Optional[Dict],
+            prefer=prefer_latest_record,
+            fallback_prefix: str = "__missing__",
+        ) -> None:
+            if not candidate:
+                return
+            key_norm = normalize_str(key)
+            if key_norm is None:
+                key_norm = f"{fallback_prefix}:{len(store)}"
+            existing = store.get(key_norm)
+            if existing is None:
+                store[key_norm] = candidate
+            else:
+                chosen = prefer(existing, candidate)
+                store[key_norm] = chosen if chosen is not None else existing
+
+        def has_meaningful_value(value) -> bool:
+            if value is None:
+                return False
+            if isinstance(value, str):
+                return bool(value.strip())
+            if isinstance(value, (list, tuple, set, dict)):
+                return len(value) > 0
+            return True
+
+        def message_dedupe_key(conv_identifier: str, msg: Dict) -> Optional[str]:
+            primary = sanitize_thread_id(
+                msg.get("id")
+                or msg.get("message_id")
+                or msg.get("mid")
+                or msg.get("messageId")
+            )
+            if primary:
+                return f"id:{conv_identifier}:{primary}"
+            created = normalize_str(iso8601(msg.get("created_time")))
+            from_name = normalize_str(((msg.get("from") or {}).get("name")))
+            snippet = normalize_str((msg.get("message") or "")[:160])
+            if not any((created, from_name, snippet)):
+                return None
+            return f"fallback:{conv_identifier}:{created}:{from_name}:{snippet}"
+
+        def merge_message_payload(existing: Dict, incoming: Dict) -> Dict:
+            if not existing:
+                return incoming
+            if not incoming:
+                return existing
+            incoming_message = incoming.get("message")
+            if isinstance(incoming_message, str):
+                existing_message = existing.get("message")
+                if not isinstance(existing_message, str) or len(incoming_message) > len(existing_message):
+                    existing["message"] = incoming_message
+            for key in ("conversation_link", "mailbox_id", "thread_type", "selected_item_id", "platform"):
+                if not has_meaningful_value(existing.get(key)) and has_meaningful_value(incoming.get(key)):
+                    existing[key] = incoming[key]
+            if not has_meaningful_value(existing.get("from")) and has_meaningful_value(incoming.get("from")):
+                existing["from"] = incoming["from"]
+            if not has_meaningful_value(existing.get("to")) and has_meaningful_value(incoming.get("to")):
+                existing["to"] = incoming["to"]
+            if has_meaningful_value(incoming.get("attachments")):
+                if has_meaningful_value(existing.get("attachments")):
+                    if isinstance(existing["attachments"], list) and isinstance(incoming["attachments"], list):
+                        existing["attachments"].extend(
+                            att for att in incoming["attachments"] if att not in existing["attachments"]
+                        )
+                    else:
+                        existing["attachments"] = incoming["attachments"]
+                else:
+                    existing["attachments"] = incoming["attachments"]
+            return existing
 
         # Posts iterieren
         for post in self.iter_posts():
@@ -769,24 +931,22 @@ Hinweise:
                 "total_count"
             )
             shares = (post.get("shares") or {}).get("count")
-    
-            posts_rows.append(
-                {
-                    "post_id": pid,
-                    "created_time": created,
-                    "updated_time": updated,
-                    "permalink_url": perma,
-                    "message": msg,
-                    "reactions_total": reacts,
-                    "shares_count": shares,
-                }
-            )
+
+            post_row = {
+                "post_id": pid,
+                "created_time": created,
+                "updated_time": updated,
+                "permalink_url": perma,
+                "message": msg,
+                "reactions_total": reacts,
+                "shares_count": shares,
+            }
             details = self.get_post_details(pid)
             post.update(details)
-            if posts_rows:
-                posts_rows[-1]["shares_count"] = (post.get("shares") or {}).get("count")
-            posts_jsonl.write(json.dumps(post, ensure_ascii=False) + "\n")
-    
+            post_row["shares_count"] = (post.get("shares") or {}).get("count")
+            store_record(post_records, pid, post)
+            store_record(posts_rows_map, pid, post_row)
+
             # Kommentare (rekursiv inkl. Replies)
             try:
                 for c in self.get_comments_for_post(pid, depth=0, parent=None):
@@ -795,23 +955,22 @@ Hinweise:
                         c["root_post_id"] = pid
                     if c.get("depth", 0) > 0 and c.get("parent_id"):
                         c.setdefault("parent_comment_id", c.get("parent_id"))
-                    comments_rows.append(
-                        {
-                            "post_id": pid,
-                            "comment_id": c.get("id"),
-                            "created_time": iso8601(c.get("created_time")),
-                            "author_id": ((c.get("from") or {}).get("id")),
-                            "author_name": ((c.get("from") or {}).get("name")),
-                            "message": (c.get("message") or "")
-                            .replace("\n", " ")
-                            .strip(),
-                            "like_count": c.get("like_count"),
-                            "parent_id": c.get("parent_id"),
-                            "depth": c.get("depth"),
-                            "permalink_url": c.get("permalink_url"),
-                        }
-                    )
-                    comments_jsonl.write(json.dumps(c, ensure_ascii=False) + "\n")
+                    comment_row = {
+                        "post_id": pid,
+                        "comment_id": c.get("id"),
+                        "created_time": iso8601(c.get("created_time")),
+                        "author_id": ((c.get("from") or {}).get("id")),
+                        "author_name": ((c.get("from") or {}).get("name")),
+                        "message": (c.get("message") or "")
+                        .replace("\n", " ")
+                        .strip(),
+                        "like_count": c.get("like_count"),
+                        "parent_id": c.get("parent_id"),
+                        "depth": c.get("depth"),
+                        "permalink_url": c.get("permalink_url"),
+                    }
+                    store_record(comment_records, c.get("id"), c, fallback_prefix="comment")
+                    store_record(comments_rows_map, c.get("id"), comment_row, fallback_prefix="comment_row")
             except Exception as e:
                 self.append_sources_manifest(f"WARN comments for {pid}: {e}")
 
@@ -819,13 +978,15 @@ Hinweise:
             try:
                 for reaction in self.get_reactions_for_post(pid):
                     reaction["post_id"] = pid
-                    reactions_jsonl.write(json.dumps(reaction, ensure_ascii=False) + "\n")
-                    reactions_rows.append({
+                    reaction_key = f"{pid}:{reaction.get('id') or ''}:{reaction.get('type') or ''}"
+                    reaction_row = {
                         "post_id": pid,
                         "user_id": reaction.get("id"),
                         "user_name": reaction.get("name"),
-                        "type": reaction.get("type")  # LIKE, LOVE, WOW, HAHA, SAD, ANGRY, THANKFUL
-                    })
+                        "type": reaction.get("type"),  # LIKE, LOVE, WOW, HAHA, SAD, ANGRY, THANKFUL
+                    }
+                    store_record(reaction_records, reaction_key, reaction, fallback_prefix="reaction")
+                    store_record(reactions_rows_map, reaction_key, reaction_row, fallback_prefix="reaction_row")
             except Exception as e:
                 self.append_sources_manifest(f"WARN reactions for {pid}: {e}")
 
@@ -835,10 +996,21 @@ Hinweise:
                 for local, src in saved:
                     self.append_sources_manifest(f"MEDIA {pid} {local} <- {src}")
 
+        for record in post_records.values():
+            posts_jsonl.write(json.dumps(record, ensure_ascii=False) + "\n")
         posts_jsonl.close()
+
+        for record in comment_records.values():
+            comments_jsonl.write(json.dumps(record, ensure_ascii=False) + "\n")
         comments_jsonl.close()
+
+        for record in reaction_records.values():
+            reactions_jsonl.write(json.dumps(record, ensure_ascii=False) + "\n")
         reactions_jsonl.close()
 
+        posts_rows = list(posts_rows_map.values())
+        comments_rows = list(comments_rows_map.values())
+        reactions_rows = list(reactions_rows_map.values())
         if reactions_rows:
             pd.DataFrame(reactions_rows).to_csv(
                 self.path("data", "reactions.csv"), index=False
@@ -882,7 +1054,9 @@ Hinweise:
                 update_meta_from_link(conv_link)
 
                 # Nachrichten innerhalb der Konversation verarbeiten um Metadaten zu sammeln
-                messages_to_write = []
+                conv_identifier = sanitize_thread_id(conv_id) or normalize_str(conv_id) or str(conv_id or "")
+                messages_map: Dict[str, Dict] = {}
+                auto_counter = 0
                 for msg in self.get_messages(conv_id):
                     msg.setdefault("conversation_id", conv_id)
                     if conv_link:
@@ -908,7 +1082,27 @@ Hinweise:
                     if selected_item_id:
                         msg.setdefault("selected_item_id", selected_item_id)
 
-                    messages_to_write.append(msg)
+                    if not self._is_within_requested_range(msg.get("created_time")):
+                        continue
+
+                    key = message_dedupe_key(conv_identifier, msg)
+                    if not key:
+                        key = f"auto:{conv_identifier}:{auto_counter}"
+                        auto_counter += 1
+                    existing_msg = messages_map.get(key)
+                    if existing_msg:
+                        messages_map[key] = merge_message_payload(existing_msg, msg)
+                    else:
+                        messages_map[key] = msg
+
+                messages_to_write = list(messages_map.values())
+                messages_to_write.sort(
+                    key=lambda m: (parse_to_utc(m.get("created_time")) or datetime.min.replace(tzinfo=timezone.utc))
+                )
+
+                conversation_in_range = self._is_within_requested_range(conv.get("updated_time"))
+                if not conversation_in_range and not messages_to_write:
+                    continue
 
                 # Extrahierte Metadaten zurück in Conversation-Objekt schreiben
                 if mailbox_id:
@@ -939,12 +1133,15 @@ Hinweise:
 
                 # Messages mit aktualisierten Metadaten schreiben
                 for msg in messages_to_write:
+                    created_iso = iso8601(msg.get("created_time"))
+                    if created_iso:
+                        msg["created_time"] = created_iso
                     msg_jsonl.write(json.dumps(msg, ensure_ascii=False) + "\n")
                     msg_rows.append(
                         {
                             "conversation_id": conv_id,
                             "message_id": msg.get("id"),
-                            "created_time": iso8601(msg.get("created_time")),
+                            "created_time": created_iso,
                             "from": (msg.get("from") or {}).get("name"),
                             "to": (
                                 ", ".join(
@@ -984,17 +1181,24 @@ Hinweise:
         # Alben und Fotos archivieren
         albums_jsonl = open(self.path("data", "albums.jsonl"), "w", encoding="utf-8")
         photos_jsonl = open(self.path("data", "photos.jsonl"), "w", encoding="utf-8")
-        albums_rows: List[Dict] = []
-        photos_rows: List[Dict] = []
+        album_records: "OrderedDict[str, Dict]" = OrderedDict()
+        photo_records: "OrderedDict[str, Dict]" = OrderedDict()
+        albums_rows_map: "OrderedDict[str, Dict]" = OrderedDict()
+        photos_rows_map: "OrderedDict[str, Dict]" = OrderedDict()
 
         try:
             for album in self.get_albums():
                 album_id = album.get("id")
                 album_name = album.get("name", "")
 
-                # Album-Metadaten speichern
-                albums_jsonl.write(json.dumps(album, ensure_ascii=False) + "\n")
-                albums_rows.append({
+                album_in_range = (
+                    self._is_within_requested_range(album.get("created_time"))
+                    or self._is_within_requested_range(album.get("updated_time"))
+                )
+                if not album_in_range:
+                    continue
+
+                album_row = {
                     "album_id": album_id,
                     "name": album_name,
                     "description": (album.get("description") or "").replace("\n", " ").strip(),
@@ -1003,7 +1207,9 @@ Hinweise:
                     "link": album.get("link"),
                     "photo_count": album.get("count", 0),
                     "type": album.get("type", "")
-                })
+                }
+                store_record(album_records, album_id, album, fallback_prefix="album")
+                store_record(albums_rows_map, album_id, album_row, fallback_prefix="album_row")
 
                 # Fotos des Albums holen
                 try:
@@ -1011,8 +1217,14 @@ Hinweise:
                         photo["album_id"] = album_id
                         photo["album_name"] = album_name
 
-                        photos_jsonl.write(json.dumps(photo, ensure_ascii=False) + "\n")
-                        photos_rows.append({
+                        photo_in_range = (
+                            self._is_within_requested_range(photo.get("created_time"))
+                            or self._is_within_requested_range(photo.get("updated_time"))
+                        )
+                        if not photo_in_range:
+                            continue
+
+                        photo_row = {
                             "album_id": album_id,
                             "album_name": album_name,
                             "photo_id": photo.get("id"),
@@ -1022,16 +1234,17 @@ Hinweise:
                             "link": photo.get("link"),
                             "width": photo.get("width"),
                             "height": photo.get("height")
-                        })
+                        }
 
                         # Foto herunterladen
                         if self.media:
                             result = self.download_photo(photo, album_id)
                             if result:
                                 local, src = result
-                                # Update photos_rows mit lokalem Pfad
-                                if photos_rows:
-                                    photos_rows[-1]["local_path"] = local
+                                photo_row["local_path"] = local
+
+                        store_record(photo_records, photo.get("id"), photo, fallback_prefix="photo")
+                        store_record(photos_rows_map, photo.get("id"), photo_row, fallback_prefix="photo_row")
 
                 except Exception as e:
                     self.append_sources_manifest(f"WARN photos for album {album_id}: {e}")
@@ -1039,13 +1252,20 @@ Hinweise:
         except Exception as e:
             self.append_sources_manifest(f"WARN albums: {e}")
 
+        for record in album_records.values():
+            albums_jsonl.write(json.dumps(record, ensure_ascii=False) + "\n")
         albums_jsonl.close()
+
+        for record in photo_records.values():
+            photos_jsonl.write(json.dumps(record, ensure_ascii=False) + "\n")
         photos_jsonl.close()
 
+        albums_rows = list(albums_rows_map.values())
         if albums_rows:
             pd.DataFrame(albums_rows).to_csv(
                 self.path("data", "albums.csv"), index=False
             )
+        photos_rows = list(photos_rows_map.values())
         if photos_rows:
             pd.DataFrame(photos_rows).to_csv(
                 self.path("data", "photos.csv"), index=False
@@ -1053,20 +1273,26 @@ Hinweise:
 
         # Events archivieren
         events_jsonl = open(self.path("data", "events.jsonl"), "w", encoding="utf-8")
-        events_rows: List[Dict] = []
+        event_records: "OrderedDict[str, Dict]" = OrderedDict()
+        events_rows_map: "OrderedDict[str, Dict]" = OrderedDict()
 
         try:
             for event in self.get_events():
                 event_id = event.get("id")
 
-                # Event-Metadaten speichern
-                events_jsonl.write(json.dumps(event, ensure_ascii=False) + "\n")
+                event_in_range = (
+                    self._is_within_requested_range(event.get("start_time"))
+                    or self._is_within_requested_range(event.get("end_time"))
+                    or self._is_within_requested_range(event.get("updated_time"))
+                )
+                if not event_in_range:
+                    continue
 
                 # Location extrahieren
                 place = event.get("place", {})
                 location_name = place.get("name", "") if isinstance(place, dict) else ""
 
-                events_rows.append({
+                event_row = {
                     "event_id": event_id,
                     "name": event.get("name", ""),
                     "description": (event.get("description") or "").replace("\n", " ").strip(),
@@ -1081,13 +1307,18 @@ Hinweise:
                     "is_canceled": event.get("is_canceled", False),
                     "is_online": event.get("is_online", False),
                     "ticket_uri": event.get("ticket_uri", "")
-                })
+                }
+                store_record(event_records, event_id, event, fallback_prefix="event")
+                store_record(events_rows_map, event_id, event_row, fallback_prefix="event_row")
 
         except Exception as e:
             self.append_sources_manifest(f"WARN events: {e}")
 
+        for record in event_records.values():
+            events_jsonl.write(json.dumps(record, ensure_ascii=False) + "\n")
         events_jsonl.close()
 
+        events_rows = list(events_rows_map.values())
         if events_rows:
             pd.DataFrame(events_rows).to_csv(
                 self.path("data", "events.csv"), index=False
@@ -1095,19 +1326,25 @@ Hinweise:
 
         # Live Videos archivieren
         live_videos_jsonl = open(self.path("data", "live_videos.jsonl"), "w", encoding="utf-8")
-        live_videos_rows: List[Dict] = []
+        live_video_records: "OrderedDict[str, Dict]" = OrderedDict()
+        live_videos_rows_map: "OrderedDict[str, Dict]" = OrderedDict()
 
         try:
             for video in self.get_live_videos():
                 video_id = video.get("id")
 
-                # Live Video-Metadaten speichern
-                live_videos_jsonl.write(json.dumps(video, ensure_ascii=False) + "\n")
+                video_in_range = (
+                    self._is_within_requested_range(video.get("created_time"))
+                    or self._is_within_requested_range(video.get("broadcast_start_time"))
+                    or self._is_within_requested_range(video.get("updated_time"))
+                )
+                if not video_in_range:
+                    continue
 
                 # Video-Objekt extrahieren
                 video_data = video.get("video", {}) if isinstance(video.get("video"), dict) else {}
 
-                live_videos_rows.append({
+                live_video_row = {
                     "video_id": video_id,
                     "title": video.get("title", ""),
                     "description": (video.get("description") or "").replace("\n", " ").strip(),
@@ -1118,13 +1355,18 @@ Hinweise:
                     "total_views": video.get("total_views", 0),
                     "permalink_url": video.get("permalink_url", ""),
                     "video_source": video_data.get("source", "") if video_data else ""
-                })
+                }
+                store_record(live_video_records, video_id, video, fallback_prefix="live_video")
+                store_record(live_videos_rows_map, video_id, live_video_row, fallback_prefix="live_video_row")
 
         except Exception as e:
             self.append_sources_manifest(f"WARN live_videos: {e}")
 
+        for record in live_video_records.values():
+            live_videos_jsonl.write(json.dumps(record, ensure_ascii=False) + "\n")
         live_videos_jsonl.close()
 
+        live_videos_rows = list(live_videos_rows_map.values())
         if live_videos_rows:
             pd.DataFrame(live_videos_rows).to_csv(
                 self.path("data", "live_videos.csv"), index=False
