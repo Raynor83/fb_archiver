@@ -627,29 +627,37 @@ class FacebookArchiver:
             "broadcast_start_time"
         ]
         endpoint = f"{self.page_info.id}/live_videos"
-        params = {"fields": ",".join(fields), "limit": 100}
-        next_url = None
+        base_params = {"fields": ",".join(fields), "limit": 100}
+        seen_ids: set[str] = set()
+        statuses = ["LIVE", "LIVE_STOPPED", "VOD"]
         with tqdm(desc="Live Videos", unit="video") as bar:
-            while True:
-                if next_url:
-                    r = self.session.get(next_url, timeout=60)
-                    if r.status_code != 200:
-                        raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                    data = r.json()
-                else:
-                    try:
-                        data = self.graph_get(endpoint, params)
-                    except Exception as e:
-                        # Live Videos könnten nicht verfügbar sein
-                        self.append_sources_manifest(f"WARN live_videos endpoint: {e}")
+            for status in statuses:
+                params = dict(base_params)
+                params["broadcast_status"] = status
+                next_url = None
+                while True:
+                    if next_url:
+                        r = self.session.get(next_url, timeout=60)
+                        if r.status_code != 200:
+                            raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
+                        data = r.json()
+                    else:
+                        try:
+                            data = self.graph_get(endpoint, params)
+                        except Exception as e:
+                            self.append_sources_manifest(f"WARN live_videos ({status}): {e}")
+                            break
+                    for video in data.get("data", []):
+                        vid = video.get("id")
+                        if not vid or vid in seen_ids:
+                            continue
+                        seen_ids.add(vid)
+                        bar.update(1)
+                        yield video
+                    paging = data.get("paging", {})
+                    next_url = paging.get("next")
+                    if not next_url:
                         break
-                for video in data.get("data", []):
-                    bar.update(1)
-                    yield video
-                paging = data.get("paging", {})
-                next_url = paging.get("next")
-                if not next_url:
-                    break
 
     def download_media_from_post(self, post: Dict) -> List[Tuple[str, str]]:
         """Gibt Liste (local_path, source_url) zurück für gespeicherte Dateien."""
