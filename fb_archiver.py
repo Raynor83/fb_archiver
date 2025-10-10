@@ -492,10 +492,19 @@ class FacebookArchiver:
             "category",
             "is_canceled",
             "is_online",
-            "is_page_owned"
+            "is_page_owned",
         ]
         endpoint = f"{self.page_info.id}/events"
-        params = {"fields": ",".join(fields), "limit": 100}
+        params = {
+            "fields": ",".join(fields),
+            "limit": self.limit,
+            "time_filter": "all",
+            "include_canceled": True,
+        }
+        if self.since:
+            params["since"] = to_utc_epoch(self.since)
+        if self.until:
+            params["until"] = to_utc_epoch(self.until)
         next_url = None
         with tqdm(desc="Events", unit="event") as bar:
             while True:
