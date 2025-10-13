@@ -633,7 +633,7 @@ class FacebookArchiver:
         with tqdm(desc="Live Videos", unit="video") as bar:
             for status in statuses:
                 params = dict(base_params)
-                params["broadcast_status"] = status
+                params["broadcast_status"] = json.dumps([status])
                 next_url = None
                 while True:
                     if next_url:
@@ -721,7 +721,8 @@ class FacebookArchiver:
                 return None
             local = self._download_stream(src, "videos")
             if local:
-                self.append_sources_manifest(f"VIDEO {post_id} {local} <- {src}")
+                local_rel = self._manifest_relpath(local)
+                self.append_sources_manifest(f"VIDEO {post_id} {local_rel} <- {src}")
                 return local
         except Exception as e:
             self.append_sources_manifest(f"WARN video source {post_id}: {e}")
@@ -746,7 +747,8 @@ class FacebookArchiver:
             local = self._download_stream(src, "images")
             if local:
                 photo_id = photo.get("id", "unknown")
-                self.append_sources_manifest(f"PHOTO {album_id}/{photo_id} {local} <- {src}")
+                local_rel = self._manifest_relpath(local)
+                self.append_sources_manifest(f"PHOTO {album_id}/{photo_id} {local_rel} <- {src}")
                 return (local, src)
         except Exception as e:
             self.append_sources_manifest(f"WARN photo download failed: {src} - {e}")
@@ -806,6 +808,15 @@ Hinweise:
     def append_sources_manifest(self, line: str):
         with open(self.path("manifests", "sources.txt"), "a", encoding="utf-8") as f:
             f.write(line.rstrip("\n") + "\n")
+
+    def _manifest_relpath(self, file_path: Optional[str]) -> Optional[str]:
+        if not file_path:
+            return file_path
+        try:
+            rel = os.path.relpath(file_path, self.outdir)
+        except Exception:
+            rel = file_path
+        return rel.replace(os.sep, "/")
 
     def write_checksums(self):
         sha_path = self.path("manifests", "checksums.sha256")
@@ -1002,7 +1013,8 @@ Hinweise:
             if self.media:
                 saved = self.download_media_from_post(post)
                 for local, src in saved:
-                    self.append_sources_manifest(f"MEDIA {pid} {local} <- {src}")
+                    local_rel = self._manifest_relpath(local)
+                    self.append_sources_manifest(f"MEDIA {pid} {local_rel} <- {src}")
 
         for record in post_records.values():
             posts_jsonl.write(json.dumps(record, ensure_ascii=False) + "\n")
