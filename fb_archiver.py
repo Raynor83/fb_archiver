@@ -677,10 +677,9 @@ class FacebookArchiver:
         mtype = (attachment.get("media_type") or "").lower()
         media = attachment.get("media") or {}
 
-        if mtype in ("video", "native_video"):
-            # Versuch, Video direkt über /videos zu holen
-            if post_id:
-                self.download_video_from_post(post_id)
+        if mtype in ("video", "native_video", "video_inline", "video_direct_response"):
+            # Versuche, Video-Quellen aus dem Attachment zu nutzen (Fallback holt Details nach)
+            self.download_video_from_post(post_id, attachment)
             return
 
         src = (
@@ -713,19 +712,63 @@ class FacebookArchiver:
                     f.write(chunk)
         return local
 
-    def download_video_from_post(self, post_id: str) -> Optional[str]:
-        try:
-            data = self.graph_get(post_id, {"fields": "id,source,title,description"})
-            src = data.get("source")
-            if not src:
+    def download_video_from_post(
+        self, post_id: Optional[str], attachment: Optional[Dict] = None
+    ) -> Optional[str]:
+        video_id: Optional[str] = None
+        src: Optional[str] = None
+
+        if attachment:
+            media = attachment.get("media") or {}
+            src = media.get("source") or attachment.get("source")
+            video_id = (attachment.get("target") or {}).get("id") or attachment.get("id")
+
+        # Falls noch keine Quelle vorhanden ist, Details zum Post nachladen
+        if not src and post_id:
+            try:
+                details = self.get_post_details(post_id)
+            except Exception:
+                details = {}
+            attachments = (details.get("attachments") or {}).get("data") or []
+            for att in attachments:
+                att_type = (att.get("media_type") or "").lower()
+                if att_type not in ("video", "native_video", "video_inline", "video_direct_response"):
+                    continue
+                media = att.get("media") or {}
+                if not src:
+                    src = media.get("source") or att.get("source")
+                if not video_id:
+                    video_id = (att.get("target") or {}).get("id") or att.get("id")
+                if src:
+                    break
+
+        # Wenn eine Video-ID existiert, aber noch keine Quelle, gezielt nach der Quelle fragen
+        lookup_id = video_id
+        if lookup_id and not src:
+            try:
+                data = self.graph_get(lookup_id, {"fields": "source"})
+                src = data.get("source")
+            except Exception as e:
+                self.append_sources_manifest(f"WARN video source {lookup_id}: {e}")
                 return None
+
+        if not src:
+            ref = lookup_id or post_id or "unknown"
+            self.append_sources_manifest(f"WARN video source {ref}: missing download source")
+            return None
+
+        try:
             local = self._download_stream(src, "videos")
-            if local:
-                local_rel = self._manifest_relpath(local)
-                self.append_sources_manifest(f"VIDEO {post_id} {local_rel} <- {src}")
-                return local
         except Exception as e:
-            self.append_sources_manifest(f"WARN video source {post_id}: {e}")
+            ref = lookup_id or post_id or "unknown"
+            self.append_sources_manifest(f"WARN video source {ref}: {e}")
+            return None
+
+        if local:
+            local_rel = self._manifest_relpath(local)
+            ref = video_id or post_id or "unknown"
+            self.append_sources_manifest(f"VIDEO {ref} {local_rel} <- {src}")
+            return local
         return None
 
     def download_photo(self, photo: Dict, album_id: str = "") -> Optional[Tuple[str, str]]:
