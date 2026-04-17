@@ -52,6 +52,8 @@ python -m pip install -r requirements.txt
 
 Das Script erwartet einen `Page Access Token`, nicht nur einen normalen Nutzer-Token. Der Token muss mindestens die für Lesezugriffe benötigten `pages_read_*`-Rechte haben.
 
+Standardmäßig verwendet das Tool Graph API `v25.0`. Die Version kann bei Bedarf per `FB_GRAPH_API_VERSION` oder `--graph-api-version` überschrieben werden.
+
 Zusätzliche Rechte:
 
 - Für Inbox- und Nachrichtenarchivierung: `pages_messaging`
@@ -84,6 +86,7 @@ Die Kommandozeilenparameter sind in `fb_archiver.py` definiert:
 - `--out` Zielverzeichnis
 - `--since` Startdatum im Format `YYYY-MM-DD`
 - `--until` Enddatum im Format `YYYY-MM-DD`
+- `--graph-api-version` Graph API-Version, standardmäßig `v25.0`
 - `--no-media` keine Bilder/Videos herunterladen
 - `--limit` API-Seitenlimit pro Anfrage
 
@@ -91,6 +94,12 @@ Hilfe anzeigen:
 
 ```powershell
 python fb_archiver.py --help
+```
+
+API-Version explizit überschreiben:
+
+```powershell
+python fb_archiver.py --page "168701373143130" --access-token $env:FB_PAGE_TOKEN --graph-api-version "v25.0" --out ".\archive_MARCHIVUM"
 ```
 
 ### Kleiner Testlauf

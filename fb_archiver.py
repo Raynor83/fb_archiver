@@ -49,11 +49,13 @@ DSGVO-HINWEIS
   Zugriff im Archiv ggf. mit Sperrfristen regeln.
 """
 
-def detect_first_post_date(page: str, token: str) -> str:
+
+def detect_first_post_date(
+    page: str, token: str, api_version: "Optional[str]" = None
+) -> str:
     """Ermittelt das älteste Post-Datum einer Seite (Paging, ohne until, ohne ID)."""
     import requests
-    GRAPH = "https://graph.facebook.com/v19.0"
-    url = f"{GRAPH}/{page}/posts"
+    url = f"{graph_base(api_version)}/{page}/posts"
     params = {
         "access_token": token,
         "fields": "created_time",
@@ -131,7 +133,29 @@ except Exception:
 
     dtparse = _FallbackParser()
 
-GRAPH = "https://graph.facebook.com/v19.0"
+
+def normalize_graph_api_version(version: Optional[str]) -> str:
+    raw = (version or "25.0").strip()
+    if not raw:
+        raise ValueError("Graph API version darf nicht leer sein.")
+    if not re.fullmatch(r"v?\d+\.\d+", raw):
+        raise ValueError(
+            f"Ungültige Graph API version '{version}'. Erwartet z. B. 'v25.0' oder '25.0'."
+        )
+    return raw if raw.startswith("v") else f"v{raw}"
+
+
+DEFAULT_GRAPH_API_VERSION = normalize_graph_api_version(
+    os.getenv("FB_GRAPH_API_VERSION", "v25.0")
+)
+
+
+def graph_base(version: Optional[str] = None) -> str:
+    selected_version = normalize_graph_api_version(version or DEFAULT_GRAPH_API_VERSION)
+    return f"https://graph.facebook.com/{selected_version}"
+
+
+GRAPH = graph_base(DEFAULT_GRAPH_API_VERSION)
 
 
 @dataclass
@@ -225,6 +249,7 @@ class FacebookArchiver:
         until: Optional[str] = None,
         media: bool = True,
         limit: int = 100,
+        graph_api_version: Optional[str] = None,
     ):
         self.page = page
         self.token = access_token
@@ -233,6 +258,10 @@ class FacebookArchiver:
         self.until = until
         self.media = media
         self.limit = limit
+        self.graph_api_version = normalize_graph_api_version(
+            graph_api_version or DEFAULT_GRAPH_API_VERSION
+        )
+        self.graph_base = graph_base(self.graph_api_version)
 
         self._since_dt = parse_to_utc(self.since)
         self._until_dt = parse_to_utc(self.until)
@@ -257,7 +286,7 @@ class FacebookArchiver:
         return os.path.join(self.outdir, *parts)
 
     def graph_get(self, endpoint: str, params: Dict) -> Dict:
-        url = f"{GRAPH}/{endpoint.lstrip('/')}"
+        url = f"{self.graph_base}/{endpoint.lstrip('/')}"
         retries = 0
         max_retries = 10  # maximal 10 Wiederholungen
 
@@ -880,7 +909,7 @@ Hinweise:
         # Basis-Infos & Doku
         self.get_page_info()
         self.write_readme()
-        self.append_sources_manifest(f"GRAPH_BASE={GRAPH}")
+        self.append_sources_manifest(f"GRAPH_BASE={self.graph_base}")
         self.append_sources_manifest(f"PAGE={self.page} -> {self.page_info.id}")
         if self.since:
             self.append_sources_manifest(f"SINCE={self.since}")
@@ -1463,6 +1492,14 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--since", help="ab Datum (YYYY-MM-DD)")
     ap.add_argument("--until", help="bis Datum (YYYY-MM-DD)")
     ap.add_argument(
+        "--graph-api-version",
+        default=DEFAULT_GRAPH_API_VERSION,
+        help=(
+            "Graph API-Version "
+            f"(Standard: {DEFAULT_GRAPH_API_VERSION}; alternativ per FB_GRAPH_API_VERSION)"
+        ),
+    )
+    ap.add_argument(
         "--no-media", action="store_true", help="keine Medien herunterladen"
     )
     ap.add_argument(
@@ -1498,6 +1535,7 @@ def run_split_by_years(args):
         until=args.until,
         media=not args.no_media,
         limit=args.limit,
+        graph_api_version=args.graph_api_version,
     )
     page_info = base_arch.get_page_info()
 
@@ -1507,7 +1545,9 @@ def run_split_by_years(args):
         start_year = int(args.since.split("-")[0])
     else:
         # Kein --since: Ermittle ältesten Post
-        first_date = detect_first_post_date(args.page, args.access_token)
+        first_date = detect_first_post_date(
+            args.page, args.access_token, api_version=args.graph_api_version
+        )
         start_year = int(first_date.split("-")[0])
 
     if args.until:
@@ -1540,6 +1580,7 @@ def run_split_by_years(args):
             until=year_until,
             media=not args.no_media,
             limit=args.limit,
+            graph_api_version=args.graph_api_version,
         )
         try:
             arch.run()
