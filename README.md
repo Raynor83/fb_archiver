@@ -27,7 +27,6 @@ Abhängigkeiten:
 - `requests`
 - `python-dateutil`
 - `tqdm`
-- `pandas`
 
 ## Installation
 

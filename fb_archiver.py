@@ -20,7 +20,7 @@ WICHTIG
 VORAUSSETZUNGEN
 - Python 3.9+
 - pip install -r requirements.txt
-  (requests, python-dateutil, tqdm, pandas)
+  (requests, python-dateutil, tqdm)
 - Facebook-App + Page-Access-Token mit den nötigen Scopes
 
 BEISPIEL
@@ -95,6 +95,7 @@ def detect_first_post_date(
 
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -109,7 +110,6 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 from tqdm import tqdm
-import pandas as pd
 
 # Optionaler Fallback, falls python-dateutil fehlt
 try:
@@ -239,6 +239,29 @@ def to_utc_epoch(dt_str: str) -> int:
     return int(dt.timestamp())
 
 
+def write_csv_rows(path: str, rows: List[Dict]) -> None:
+    """Schreibt Zeilen als CSV und bildet die Spaltenmenge stabil aus allen Dict-Keys."""
+    if not rows:
+        return
+
+    fieldnames: List[str] = []
+    seen = set()
+    for row in rows:
+        for key in row.keys():
+            if key not in seen:
+                seen.add(key)
+                fieldnames.append(key)
+
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+class MediaDownloadRejected(RuntimeError):
+    """Das geladene Payload ist kein archivierungsfaehiges Medium."""
+
+
 class FacebookArchiver:
     def __init__(
         self,
@@ -250,6 +273,7 @@ class FacebookArchiver:
         media: bool = True,
         limit: int = 100,
         graph_api_version: Optional[str] = None,
+        prepare_output_dirs: bool = True,
     ):
         self.page = page
         self.token = access_token
@@ -272,11 +296,12 @@ class FacebookArchiver:
             else:
                 self._until_cutoff = self._until_dt
 
-        os.makedirs(self.outdir, exist_ok=True)
-        os.makedirs(self.path("data"), exist_ok=True)
-        os.makedirs(self.path("media/images"), exist_ok=True)
-        os.makedirs(self.path("media/videos"), exist_ok=True)
-        os.makedirs(self.path("manifests"), exist_ok=True)
+        if prepare_output_dirs:
+            os.makedirs(self.outdir, exist_ok=True)
+            os.makedirs(self.path("data"), exist_ok=True)
+            os.makedirs(self.path("media/images"), exist_ok=True)
+            os.makedirs(self.path("media/videos"), exist_ok=True)
+            os.makedirs(self.path("manifests"), exist_ok=True)
 
         self.session = requests.Session()
         self.session.params = {"access_token": self.token}
@@ -721,22 +746,117 @@ class FacebookArchiver:
             return
 
         try:
-            local = self._download_stream(src, "images")
+            local = self._download_stream(src, "images", expected_kind="image")
             if local:
                 saved.append((local, src))
-        except Exception:
+        except Exception as e:
             # Medienfehler nicht abbrechen, aber vermerken
-            self.append_sources_manifest(f"WARN media download failed: {src}")
+            self.append_sources_manifest(f"WARN media download failed: {src} - {e}")
 
-    def _download_stream(self, url: str, subdir: str) -> Optional[str]:
+    @staticmethod
+    def _looks_like_html(payload: bytes) -> bool:
+        head = payload.lstrip()[:512].lower()
+        return head.startswith(b"<!doctype html") or head.startswith(b"<html") or b"<html" in head
+
+    @staticmethod
+    def _looks_like_image_payload(payload: bytes) -> bool:
+        return (
+            payload.startswith(b"\x89PNG\r\n\x1a\n")
+            or payload.startswith(b"\xff\xd8\xff")
+            or payload.startswith((b"GIF87a", b"GIF89a"))
+            or payload.startswith(b"RIFF") and payload[8:12] == b"WEBP"
+        )
+
+    @staticmethod
+    def _looks_like_video_payload(payload: bytes) -> bool:
+        return payload[4:8] == b"ftyp" or payload.startswith(b"\x1a\x45\xdf\xa3")
+
+    @staticmethod
+    def _png_dimensions(payload: bytes) -> Optional[Tuple[int, int]]:
+        if len(payload) < 24 or not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+            return None
+        width = int.from_bytes(payload[16:20], "big")
+        height = int.from_bytes(payload[20:24], "big")
+        return width, height
+
+    @staticmethod
+    def _gif_dimensions(payload: bytes) -> Optional[Tuple[int, int]]:
+        if len(payload) < 10 or not payload.startswith((b"GIF87a", b"GIF89a")):
+            return None
+        width = int.from_bytes(payload[6:8], "little")
+        height = int.from_bytes(payload[8:10], "little")
+        return width, height
+
+    @staticmethod
+    def _is_external_video_embed(url: str) -> bool:
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        path = parsed.path.lower()
+        if host in {"youtube.com", "www.youtube.com", "m.youtube.com"} and path.startswith("/embed/"):
+            return True
+        return host == "youtu.be"
+
+    def _placeholder_image_reason(self, payload: bytes) -> Optional[str]:
+        dims = self._png_dimensions(payload) or self._gif_dimensions(payload)
+        if dims and dims[0] <= 1 and dims[1] <= 1:
+            return f"placeholder image {dims[0]}x{dims[1]}"
+        return None
+
+    def _download_stream(
+        self, url: str, subdir: str, expected_kind: Optional[str] = None
+    ) -> Optional[str]:
+        if expected_kind == "video" and self._is_external_video_embed(url):
+            raise MediaDownloadRejected("external video embed instead of downloadable video")
+
         r = self.session.get(url, timeout=60, stream=True)
         if r.status_code != 200:
-            return None
+            raise MediaDownloadRejected(f"HTTP {r.status_code}")
+
+        content_type = (r.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        chunks = r.iter_content(chunk_size=8192)
+        first_chunk = b""
+        for chunk in chunks:
+            if chunk:
+                first_chunk = chunk
+                break
+
+        if not first_chunk:
+            raise MediaDownloadRejected("empty response")
+
+        if self._looks_like_html(first_chunk):
+            raise MediaDownloadRejected(
+                f"expected {expected_kind or 'media'}, got HTML content"
+            )
+
+        if expected_kind == "image":
+            if content_type and not (
+                content_type.startswith("image/")
+                or content_type == "application/octet-stream"
+                and self._looks_like_image_payload(first_chunk)
+            ):
+                raise MediaDownloadRejected(f"expected image, got {content_type}")
+            if not content_type and not self._looks_like_image_payload(first_chunk):
+                raise MediaDownloadRejected("expected image payload")
+            placeholder_reason = self._placeholder_image_reason(first_chunk)
+            if placeholder_reason:
+                raise MediaDownloadRejected(placeholder_reason)
+
+        if expected_kind == "video":
+            if content_type and not (
+                content_type.startswith("video/")
+                or content_type == "application/octet-stream"
+                and self._looks_like_video_payload(first_chunk)
+            ):
+                raise MediaDownloadRejected(f"expected video, got {content_type}")
+            if not content_type and not self._looks_like_video_payload(first_chunk):
+                raise MediaDownloadRejected("expected video payload")
+
         ext = self._guess_ext(r.headers.get("Content-Type"))
         fname = safe_filename(f"{int(time.time()*1000)}") + ext
         local = self.path("media", subdir, fname)
         with open(local, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
+            f.write(first_chunk)
+            for chunk in chunks:
                 if chunk:
                     f.write(chunk)
         return local
@@ -787,7 +907,7 @@ class FacebookArchiver:
             return None
 
         try:
-            local = self._download_stream(src, "videos")
+            local = self._download_stream(src, "videos", expected_kind="video")
         except Exception as e:
             ref = lookup_id or post_id or "unknown"
             self.append_sources_manifest(f"WARN video source {ref}: {e}")
@@ -816,7 +936,7 @@ class FacebookArchiver:
             return None
 
         try:
-            local = self._download_stream(src, "images")
+            local = self._download_stream(src, "images", expected_kind="image")
             if local:
                 photo_id = photo.get("id", "unknown")
                 local_rel = self._manifest_relpath(local)
@@ -837,6 +957,8 @@ class FacebookArchiver:
             return ".png"
         if "gif" in ct:
             return ".gif"
+        if "webp" in ct:
+            return ".webp"
         if "mp4" in ct:
             return ".mp4"
         if "webm" in ct:
@@ -1104,9 +1226,7 @@ Hinweise:
         comments_rows = list(comments_rows_map.values())
         reactions_rows = list(reactions_rows_map.values())
         if reactions_rows:
-            pd.DataFrame(reactions_rows).to_csv(
-                self.path("data", "reactions.csv"), index=False
-            )
+            write_csv_rows(self.path("data", "reactions.csv"), reactions_rows)
     
         # Inbox-Konversationen archivieren
         conv_jsonl = open(
@@ -1262,13 +1382,9 @@ Hinweise:
         msg_jsonl.close()
 
         if conv_rows:
-            pd.DataFrame(conv_rows).to_csv(
-                self.path("data", "conversations.csv"), index=False
-            )
+            write_csv_rows(self.path("data", "conversations.csv"), conv_rows)
         if msg_rows:
-            pd.DataFrame(msg_rows).to_csv(
-                self.path("data", "messages.csv"), index=False
-            )
+            write_csv_rows(self.path("data", "messages.csv"), msg_rows)
 
         # Alben und Fotos archivieren
         albums_jsonl = open(self.path("data", "albums.jsonl"), "w", encoding="utf-8")
@@ -1354,14 +1470,10 @@ Hinweise:
 
         albums_rows = list(albums_rows_map.values())
         if albums_rows:
-            pd.DataFrame(albums_rows).to_csv(
-                self.path("data", "albums.csv"), index=False
-            )
+            write_csv_rows(self.path("data", "albums.csv"), albums_rows)
         photos_rows = list(photos_rows_map.values())
         if photos_rows:
-            pd.DataFrame(photos_rows).to_csv(
-                self.path("data", "photos.csv"), index=False
-            )
+            write_csv_rows(self.path("data", "photos.csv"), photos_rows)
 
         # Events archivieren
         events_jsonl = open(self.path("data", "events.jsonl"), "w", encoding="utf-8")
@@ -1412,9 +1524,7 @@ Hinweise:
 
         events_rows = list(events_rows_map.values())
         if events_rows:
-            pd.DataFrame(events_rows).to_csv(
-                self.path("data", "events.csv"), index=False
-            )
+            write_csv_rows(self.path("data", "events.csv"), events_rows)
 
         # Live Videos archivieren
         live_videos_jsonl = open(self.path("data", "live_videos.jsonl"), "w", encoding="utf-8")
@@ -1460,17 +1570,13 @@ Hinweise:
 
         live_videos_rows = list(live_videos_rows_map.values())
         if live_videos_rows:
-            pd.DataFrame(live_videos_rows).to_csv(
-                self.path("data", "live_videos.csv"), index=False
-            )
+            write_csv_rows(self.path("data", "live_videos.csv"), live_videos_rows)
 
         # CSV schreiben
         if posts_rows:
-            pd.DataFrame(posts_rows).to_csv(self.path("data", "posts.csv"), index=False)
+            write_csv_rows(self.path("data", "posts.csv"), posts_rows)
         if comments_rows:
-            pd.DataFrame(comments_rows).to_csv(
-                self.path("data", "comments.csv"), index=False
-            )
+            write_csv_rows(self.path("data", "comments.csv"), comments_rows)
 
         # Checksums
         self.write_checksums()
@@ -1536,6 +1642,7 @@ def run_split_by_years(args):
         media=not args.no_media,
         limit=args.limit,
         graph_api_version=args.graph_api_version,
+        prepare_output_dirs=False,
     )
     page_info = base_arch.get_page_info()
 

@@ -1,4 +1,5 @@
 import sys
+from base64 import b64decode
 from pathlib import Path
 from unittest.mock import Mock, call
 
@@ -52,8 +53,8 @@ def test_download_media_handles_subattachments(tmp_path):
     ]
     archiver._download_stream.assert_has_calls(
         [
-            call("http://example.com/1.jpg", "images"),
-            call("http://example.com/2.jpg", "images"),
+            call("http://example.com/1.jpg", "images", expected_kind="image"),
+            call("http://example.com/2.jpg", "images", expected_kind="image"),
         ]
     )
 
@@ -102,5 +103,53 @@ def test_download_video_falls_back_to_video_id_lookup(tmp_path):
     assert saved == "video1"
     archiver.graph_get.assert_called_once_with("video123", {"fields": "source"})
     archiver._download_stream.assert_called_once_with(
-        "http://example.com/video.mp4", "videos"
+        "http://example.com/video.mp4", "videos", expected_kind="video"
     )
+
+
+def test_download_video_skips_external_embed(tmp_path):
+    archiver = make_archiver(tmp_path)
+    archiver.append_sources_manifest = Mock()
+    archiver.session.get = Mock()
+
+    saved = archiver.download_video_from_post(
+        "post1",
+        {
+            "id": "attachment1",
+            "media_type": "video",
+            "media": {"source": "https://www.youtube.com/embed/APXVJ1FZ4G8?autoplay=1"},
+            "target": {"id": "video123"},
+        },
+    )
+
+    assert saved is None
+    assert list((tmp_path / "media" / "videos").iterdir()) == []
+    archiver.session.get.assert_not_called()
+    archiver.append_sources_manifest.assert_called_once()
+    assert "external video embed" in archiver.append_sources_manifest.call_args[0][0]
+
+
+def test_download_photo_skips_placeholder_png(tmp_path):
+    archiver = make_archiver(tmp_path)
+    archiver.append_sources_manifest = Mock()
+    placeholder_png = b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="
+    )
+    response = Mock(
+        status_code=200,
+        headers={"Content-Type": "image/png"},
+    )
+    response.iter_content = Mock(return_value=iter([placeholder_png]))
+    archiver.session.get = Mock(return_value=response)
+
+    saved = archiver.download_photo(
+        {
+            "id": "photo1",
+            "picture": "https://example.com/tracker.png",
+        }
+    )
+
+    assert saved is None
+    assert list((tmp_path / "media" / "images").iterdir()) == []
+    archiver.append_sources_manifest.assert_called_once()
+    assert "placeholder image 1x1" in archiver.append_sources_manifest.call_args[0][0]

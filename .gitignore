@@ -7,7 +7,6 @@ fb_archive_out/
 backup/fb_archiv_html_viewer.html
 backup/fb_archiver.py
 .claude/settings.local.json
-fb_archiver.spec
 build/fb_archiver/Analysis-00.toc
 build/fb_archiver/base_library.zip
 build/fb_archiver/EXE-00.toc
