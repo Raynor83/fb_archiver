@@ -110,7 +110,7 @@ def test_download_video_falls_back_to_video_id_lookup(tmp_path):
 def test_download_video_skips_external_embed(tmp_path):
     archiver = make_archiver(tmp_path)
     archiver.append_sources_manifest = Mock()
-    archiver.session.get = Mock()
+    archiver.media_session.get = Mock()
 
     saved = archiver.download_video_from_post(
         "post1",
@@ -124,7 +124,7 @@ def test_download_video_skips_external_embed(tmp_path):
 
     assert saved is None
     assert list((tmp_path / "media" / "videos").iterdir()) == []
-    archiver.session.get.assert_not_called()
+    archiver.media_session.get.assert_not_called()
     archiver.append_sources_manifest.assert_called_once()
     assert "external video embed" in archiver.append_sources_manifest.call_args[0][0]
 
@@ -140,7 +140,7 @@ def test_download_photo_skips_placeholder_png(tmp_path):
         headers={"Content-Type": "image/png"},
     )
     response.iter_content = Mock(return_value=iter([placeholder_png]))
-    archiver.session.get = Mock(return_value=response)
+    archiver.media_session.get = Mock(return_value=response)
 
     saved = archiver.download_photo(
         {
@@ -153,3 +153,22 @@ def test_download_photo_skips_placeholder_png(tmp_path):
     assert list((tmp_path / "media" / "images").iterdir()) == []
     archiver.append_sources_manifest.assert_called_once()
     assert "placeholder image 1x1" in archiver.append_sources_manifest.call_args[0][0]
+
+
+def test_media_session_does_not_carry_graph_access_token(tmp_path):
+    archiver = make_archiver(tmp_path)
+
+    assert archiver.session.params["access_token"] == "token"
+    assert "access_token" not in archiver.media_session.params
+
+
+def test_manifest_redacts_access_tokens(tmp_path):
+    archiver = make_archiver(tmp_path)
+
+    archiver.append_sources_manifest(
+        "WARN https://example.invalid/file?access_token=secret-value&next=1"
+    )
+
+    manifest = (tmp_path / "manifests" / "sources.txt").read_text(encoding="utf-8")
+    assert "secret-value" not in manifest
+    assert "access_token=[REDACTED]" in manifest

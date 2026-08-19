@@ -280,6 +280,7 @@ async function loadFromDirectory(){
   await addFileIfExists('data/reactions.jsonl');
   await addFileIfExists('data/live_videos.jsonl');
   await addFileIfExists('manifests/sources.txt');
+  await addFileIfExists('manifests/checksums.sha256');
   await addMediaDir('media/images');
   await addMediaDir('media/videos');
 
@@ -299,6 +300,7 @@ async function loadFromDirectory(){
         await addFileIfExists(`${sub}/data/reactions.jsonl`);
         await addFileIfExists(`${sub}/data/live_videos.jsonl`);
         await addFileIfExists(`${sub}/manifests/sources.txt`);
+        await addFileIfExists(`${sub}/manifests/checksums.sha256`);
         await addMediaDir(`${sub}/media/images`);
         await addMediaDir(`${sub}/media/videos`);
       }
@@ -351,9 +353,16 @@ async function addFileIfExists(path){
   }catch{ /* ignore */ }
 }
 
-function ingestFiles(fileList){
-  for(const f of fileList){ state.files.set(f.name, f); }
-  parseAll().then(()=>{ render(); renderManifests(); renderMediaGallery(); });
+async function ingestFiles(fileList){
+  for(const f of fileList){
+    const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/');
+    state.files.set(path, f);
+  }
+  await parseAll();
+  await buildMediaMap();
+  render();
+  await renderManifests();
+  await renderMediaGallery();
 }
 
 async function parseAll(){
@@ -1156,31 +1165,32 @@ function renderConversationThreads(){
 }
 
 async function buildMediaMap(){
-  // Parse manifests/sources.txt for MEDIA, VIDEO, and PHOTO lines
-  const mf = [...state.files.entries()].find(([p])=>/manifests\/sources\.txt$/.test(p));
-  if(!mf) return; const [, file] = mf; const txt = await file.text();
-  const lines = txt.split(/\r?\n/);
-  for(const line of lines){
-    // MEDIA lines (images from posts)
-    const m = /^MEDIA\s+(\d+_?\d*)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
-    if(m){
-      const postId = m[1]; const local = m[2];
-      if(!state.mediaMap.has(postId)) state.mediaMap.set(postId, []);
-      state.mediaMap.get(postId).push(local);
-    }
-    // VIDEO lines (videos from posts)
-    const v = /^VIDEO\s+(\d+_?\d*)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
-    if(v){
-      const postId = v[1]; const local = v[2];
-      if(!state.mediaMap.has(postId)) state.mediaMap.set(postId, []);
-      state.mediaMap.get(postId).push(local);
-    }
-    // PHOTO lines (photos from albums)
-    const p = /^PHOTO\s+([^/]+)\/(\S+)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
-    if(p){
-      const photoId = p[2]; const local = p[3];
-      if(!state.mediaMap.has(photoId)) state.mediaMap.set(photoId, []);
-      state.mediaMap.get(photoId).push(local);
+  state.mediaMap.clear();
+  const manifests = [...state.files.entries()].filter(([path])=>/(^|\/)sources\.txt$/.test(path));
+  for(const [manifestPath, file] of manifests){
+    const prefix = manifestPath.replace(/(?:manifests\/)?sources\.txt$/, '');
+    const resolvePath = localPath => {
+      const normalized = localPath.replace(/\\/g, '/');
+      const candidates = [prefix + normalized, normalized, normalized.split('/').pop()];
+      return candidates.find(candidate => state.files.has(candidate)) || prefix + normalized;
+    };
+    const addMapping = (id, localPath) => {
+      const resolved = resolvePath(localPath);
+      if(!state.mediaMap.has(id)) state.mediaMap.set(id, []);
+      const entries = state.mediaMap.get(id);
+      if(!entries.includes(resolved)) entries.push(resolved);
+    };
+
+    const txt = await file.text();
+    for(const line of txt.split(/\r?\n/)){
+      const media = /^MEDIA\s+(\d+_?\d*)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
+      if(media) addMapping(media[1], media[2]);
+
+      const video = /^VIDEO\s+(\d+_?\d*)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
+      if(video) addMapping(video[1], video[2]);
+
+      const photo = /^PHOTO\s+([^/]+)\/(\S+)\s+(.+?)\s+<-\s+(.+)$/.exec(line);
+      if(photo) addMapping(photo[2], photo[3]);
     }
   }
 }
@@ -1204,13 +1214,19 @@ async function renderMediaGallery(){
 
 async function renderManifests(){
   const list = $$('#manifests'); list.innerHTML='';
-  // checksums
-  const chk = [...state.files.entries()].find(([p])=>/manifests\/checksums\.sha256$/.test(p));
-  if(chk){ const txt = await chk[1].text(); list.appendChild(manifestCard('checksums.sha256', txt.slice(0, 5000))); }
-  const src = [...state.files.entries()].find(([p])=>/manifests\/sources\.txt$/.test(p));
-  if(src){ const txt = await src[1].text(); list.appendChild(manifestCard('sources.txt', txt.slice(0, 500000))); }
-  const readme = [...state.files.entries()].find(([p])=>/README\.txt$/.test(p));
-  if(readme){ const txt = await readme[1].text(); list.appendChild(manifestCard('README.txt', txt)); }
+  const entries = [...state.files.entries()];
+  for(const [path, file] of entries.filter(([p])=>/(^|\/)checksums\.sha256$/.test(p))){
+    const txt = await file.text();
+    list.appendChild(manifestCard(path, txt.slice(0, 5000)));
+  }
+  for(const [path, file] of entries.filter(([p])=>/(^|\/)sources\.txt$/.test(p))){
+    const txt = await file.text();
+    list.appendChild(manifestCard(path, txt.slice(0, 500000)));
+  }
+  for(const [path, file] of entries.filter(([p])=>/(^|\/)README\.txt$/.test(p))){
+    const txt = await file.text();
+    list.appendChild(manifestCard(path, txt));
+  }
 }
 
 function manifestCard(title, content){
