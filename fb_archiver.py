@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 fb_archiver.py — Graph-API-basiertes Facebook-Archiv-Tool für Seiten (Pages)
 
@@ -25,11 +27,12 @@ VORAUSSETZUNGEN
 
 BEISPIEL
     python fb_archiver.py \
-        --page "StadtMannheim" \
-        --access-token "EAAG..." \
-        --since "2020-01-01" \
+        --page "168701373143130" \
+        --since "2025-01-01" \
         --until "2025-12-31" \
-        --out ./archive_Marchivum
+        --out ./archive_MARCHIVUM_2025
+
+    Der Page Access Token wird dabei aus FB_PAGE_TOKEN gelesen.
 
 AUSGABE
 archive_Marchivum/
@@ -50,66 +53,26 @@ DSGVO-HINWEIS
 """
 
 
-def detect_first_post_date(
-    page: str, token: str, api_version: "Optional[str]" = None
-) -> str:
-    """Ermittelt das älteste Post-Datum einer Seite (Paging, ohne until, ohne ID)."""
-    import requests
-    url = f"{graph_base(api_version)}/{page}/posts"
-    params = {
-        "access_token": token,
-        "fields": "created_time",
-        "limit": 100
-    }
-
-    oldest = None
-    page_count = 0
-    while True:
-        r = requests.get(url, params=params, timeout=60)
-        if r.status_code != 200:
-            print(f"[WARN] Fehler bei detect_first_post_date: {r.status_code} {r.text}")
-            break
-
-        data = r.json()
-        posts = data.get("data", [])
-        if not posts:
-            break
-
-        page_count += 1
-        last_date = posts[-1]["created_time"].split("T")[0]
-        oldest = last_date
-        print(f"[DEBUG] Seite {page_count}: ältestes bisher {oldest}")
-
-        paging = data.get("paging", {})
-        if "next" in paging:
-            url = paging["next"]
-            params = {}  # "next" enthält alles Nötige
-        else:
-            break
-
-    print(f"[INFO] Ältestes gefundenes Datum: {oldest or '2010-01-01'}")
-    return oldest or "2010-01-01"
-
-
-#!/usr/bin/env python3
-
-
 import argparse
 import csv
 import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 import requests
 from tqdm import tqdm
+
+TOOL_VERSION = "2026.08.2"
 
 # Optionaler Fallback, falls python-dateutil fehlt
 try:
@@ -135,18 +98,18 @@ except Exception:
 
 
 def normalize_graph_api_version(version: Optional[str]) -> str:
-    raw = (version or "25.0").strip()
+    raw = (version or "26.0").strip()
     if not raw:
         raise ValueError("Graph API version darf nicht leer sein.")
     if not re.fullmatch(r"v?\d+\.\d+", raw):
         raise ValueError(
-            f"Ungültige Graph API version '{version}'. Erwartet z. B. 'v25.0' oder '25.0'."
+            f"Ungültige Graph API version '{version}'. Erwartet z. B. 'v26.0' oder '26.0'."
         )
     return raw if raw.startswith("v") else f"v{raw}"
 
 
 DEFAULT_GRAPH_API_VERSION = normalize_graph_api_version(
-    os.getenv("FB_GRAPH_API_VERSION", "v25.0")
+    os.getenv("FB_GRAPH_API_VERSION", "v26.0")
 )
 
 
@@ -229,6 +192,86 @@ def safe_filename(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "-", name)[:200]
 
 
+def redact_access_tokens(value: str) -> str:
+    return re.sub(
+        r"(?i)(access_token(?:%3D|=))[^&\s\"']+",
+        r"\1[REDACTED]",
+        str(value),
+    )
+
+
+def detect_first_post_date(
+    page: str, token: str, api_version: Optional[str] = None
+) -> str:
+    """Ermittelt das älteste Post-Datum einer Seite (Paging, ohne until, ohne ID)."""
+    url = f"{graph_base(api_version)}/{page}/posts"
+    params = {
+        "fields": "created_time",
+        "limit": 100,
+    }
+    session = requests.Session()
+    session.params = {"access_token": token}
+    session.headers.update({"User-Agent": f"fb_archiver/{TOOL_VERSION}"})
+
+    oldest = None
+    page_count = 0
+    while True:
+        response = None
+        for attempt in range(6):
+            try:
+                response = session.get(url, params=params, timeout=60)
+            except requests.RequestException as exc:
+                if attempt >= 5:
+                    raise RuntimeError(
+                        "Ältestes Post-Datum konnte wegen eines Netzwerkfehlers "
+                        f"nicht ermittelt werden: {redact_access_tokens(exc)}"
+                    ) from exc
+                time.sleep(min(2**attempt, 30))
+                continue
+
+            if response.status_code == 200:
+                break
+            if response.status_code in {429, 500, 502, 503, 504} and attempt < 5:
+                time.sleep(min(2**attempt, 30))
+                continue
+            raise RuntimeError(
+                "Ältestes Post-Datum konnte nicht ermittelt werden: "
+                f"Graph API {response.status_code}: "
+                f"{redact_access_tokens(response.text)}"
+            )
+
+        if response is None or response.status_code != 200:
+            raise RuntimeError("Ältestes Post-Datum konnte nicht ermittelt werden.")
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                "Ältestes Post-Datum: Graph API lieferte ungültiges JSON."
+            ) from exc
+        posts = data.get("data", [])
+        if not posts:
+            break
+
+        page_count += 1
+        oldest = posts[-1]["created_time"].split("T")[0]
+        print(f"[DEBUG] Seite {page_count}: ältestes bisher {oldest}")
+
+        paging = data.get("paging", {})
+        if "next" in paging:
+            url = paging["next"]
+            params = {}  # "next" enthält alles Nötige
+        else:
+            break
+
+    if oldest is None:
+        oldest = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        print("[INFO] Keine Posts gefunden; starte mit dem aktuellen Jahr.")
+    else:
+        print(f"[INFO] Ältestes gefundenes Datum: {oldest}")
+    return oldest
+
+
 def to_utc_epoch(dt_str: str) -> int:
     """Konvertiert einen Datum/Zeit-String in Sekunden seit Epoche (UTC)."""
     dt = dtparse.parse(dt_str)
@@ -237,6 +280,40 @@ def to_utc_epoch(dt_str: str) -> int:
     else:
         dt = dt.astimezone(timezone.utc)
     return int(dt.timestamp())
+
+
+def to_api_until_epoch(dt_str: str) -> int:
+    """Meta behandelt ``until`` exklusiv; ein reines Datum umfasst daher den Folgetag."""
+    dt = dtparse.parse(dt_str)
+    if getattr(dt, "tzinfo", None) is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", dt_str.strip()):
+        dt += timedelta(days=1)
+    return int(dt.timestamp())
+
+
+def parse_cli_date(value: str) -> str:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Ungültiges Datum '{value}'. Erwartet wird YYYY-MM-DD."
+        ) from exc
+    return value
+
+
+def prepare_output_directory(path: Path, overwrite: bool = False) -> None:
+    """Verhindert, dass neue Exporte unbemerkt mit alten Dateien vermischt werden."""
+    if not path.exists() or not any(path.iterdir()):
+        return
+    if not overwrite:
+        raise FileExistsError(
+            f"Ausgabeverzeichnis ist nicht leer: {path}. "
+            "Nutze ein neues --out oder bestätige das Ersetzen mit --overwrite."
+        )
+    shutil.rmtree(path)
 
 
 def write_csv_rows(path: str, rows: List[Dict]) -> None:
@@ -256,6 +333,24 @@ def write_csv_rows(path: str, rows: List[Dict]) -> None:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+class GraphAPIError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        status_code: int,
+        code: Optional[int] = None,
+        subcode: Optional[int] = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.subcode = subcode
+
+
+def is_authentication_error(exc: BaseException) -> bool:
+    return isinstance(exc, GraphAPIError) and exc.code == 190
 
 
 class MediaDownloadRejected(RuntimeError):
@@ -305,6 +400,13 @@ class FacebookArchiver:
 
         self.session = requests.Session()
         self.session.params = {"access_token": self.token}
+        self.session.headers.update({"User-Agent": f"fb_archiver/{TOOL_VERSION}"})
+        # Media URLs can point to arbitrary third-party hosts. They must never use
+        # the Graph session, which carries the Page token as a default parameter.
+        self.media_session = requests.Session()
+        self.media_session.headers.update(
+            {"User-Agent": f"fb_archiver/{TOOL_VERSION}"}
+        )
         self.page_info: Optional[PageInfo] = None
 
     def path(self, *parts) -> str:
@@ -312,32 +414,81 @@ class FacebookArchiver:
 
     def graph_get(self, endpoint: str, params: Dict) -> Dict:
         url = f"{self.graph_base}/{endpoint.lstrip('/')}"
-        retries = 0
-        max_retries = 10  # maximal 10 Wiederholungen
+        return self._request_json(url, params=params, context="Graph API")
 
-        while True:
-            r = self.session.get(url, params=params, timeout=60)
-            if r.status_code == 200:
-                return r.json()
-
-            # Bei temporären Fehlern: wiederholen
-            if r.status_code in (429, 500, 502, 503, 504):
-                retries += 1
-                if retries > max_retries:
+    def _request_json(
+        self,
+        url: str,
+        params: Optional[Dict] = None,
+        context: str = "Graph API paging",
+        max_retries: int = 6,
+    ) -> Dict:
+        transient_codes = {1, 2, 4, 17, 32, 613}
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.session.get(url, params=params, timeout=60)
+            except requests.RequestException as exc:
+                if attempt >= max_retries:
                     raise RuntimeError(
-                        f"Graph API error {r.status_code} after {max_retries} retries: {r.text}"
-                    )
-
-                retry_after = int(r.headers.get("Retry-After", "5"))
-                wait_time = min(retry_after, 30)
+                        f"{context} network error after {max_retries} retries: "
+                        f"{redact_access_tokens(exc)}"
+                    ) from exc
+                wait_time = min(2**attempt, 30)
                 print(
-                    f"[WARN] Graph API {r.status_code}, retry {retries}/{max_retries} in {wait_time}s ..."
+                    f"[WARN] {context} network error, retry "
+                    f"{attempt + 1}/{max_retries} in {wait_time}s ..."
                 )
                 time.sleep(wait_time)
                 continue
 
-            # Alle anderen Fehler sofort abbrechen
-            raise RuntimeError(f"Graph API error {r.status_code}: {r.text}")
+            if response.status_code == 200:
+                try:
+                    return response.json()
+                except ValueError as exc:
+                    raise RuntimeError(f"{context} returned invalid JSON") from exc
+
+            error_code = None
+            error_subcode = None
+            message = response.text
+            try:
+                error = (response.json() or {}).get("error") or {}
+                error_code = error.get("code")
+                error_subcode = error.get("error_subcode")
+                message = error.get("message") or message
+            except ValueError:
+                pass
+
+            temporary = response.status_code in {429, 500, 502, 503, 504}
+            temporary = temporary or error_code in transient_codes
+            if temporary and attempt < max_retries:
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    wait_time = min(max(float(retry_after), 0), 30)
+                except (TypeError, ValueError):
+                    wait_time = min(2**attempt, 30)
+                print(
+                    f"[WARN] {context} {response.status_code}, retry "
+                    f"{attempt + 1}/{max_retries} in {wait_time:g}s ..."
+                )
+                time.sleep(wait_time)
+                continue
+
+            details = redact_access_tokens(message)
+            code_info = f"code={error_code}"
+            if error_subcode is not None:
+                code_info += f", subcode={error_subcode}"
+            if error_code == 190:
+                details += " (Access Token ist ungültig oder abgelaufen.)"
+            elif error_code in {10, 200}:
+                details += " (Berechtigung oder App-Freigabe fehlt.)"
+            raise GraphAPIError(
+                f"{context} error {response.status_code} ({code_info}): {details}",
+                status_code=response.status_code,
+                code=error_code,
+                subcode=error_subcode,
+            )
+
+        raise RuntimeError(f"{context} failed unexpectedly")
 
     def _is_within_requested_range(self, dt_str: Optional[str]) -> bool:
         if not dt_str:
@@ -371,34 +522,14 @@ class FacebookArchiver:
         if self.since:
             params["since"] = to_utc_epoch(self.since)
         if self.until:
-            params["until"] = to_utc_epoch(self.until)
+            params["until"] = to_api_until_epoch(self.until)
 
         endpoint = f"{self.page_info.id}/posts"
         next_url = None
         with tqdm(desc="Posts", unit="post") as bar:
             while True:
                 if next_url:
-                    retries = 0
-                    while True:
-                        r = self.session.get(next_url, timeout=60)
-                        if r.status_code == 200:
-                            data = r.json()
-                            break
-                        if r.status_code in (429, 500, 502, 503, 504):
-                            retries += 1
-                            if retries > 5:
-                                raise RuntimeError(
-                                    f"Graph paging error {r.status_code} after retries: {r.text}"
-                                )
-                            wait_time = min(int(r.headers.get("Retry-After", "5")), 30)
-                            print(
-                                f"[WARN] Paging error {r.status_code}, retry {retries}/5 in {wait_time}s ..."
-                            )
-                            time.sleep(wait_time)
-                            continue
-                        raise RuntimeError(
-                            f"Graph paging error {r.status_code}: {r.text}"
-                        )
+                    data = self._request_json(next_url, context="Posts paging")
                 else:
                     data = self.graph_get(endpoint, params)
 
@@ -425,6 +556,8 @@ class FacebookArchiver:
             data = self.graph_get(post_id, {"fields": ",".join(fields)})
             return data
         except Exception as e:
+            if is_authentication_error(e):
+                raise
             self.append_sources_manifest(f"WARN details for {post_id}: {e}")
             return {}
     def get_reactions_for_post(self, post_id: str) -> Iterable[Dict]:
@@ -435,17 +568,9 @@ class FacebookArchiver:
         next_url = None
         while True:
             if next_url:
-                r = self.session.get(next_url, timeout=60)
-                if r.status_code != 200:
-                    # Wenn Reactions nicht verfügbar sind, leise abbrechen
-                    break
-                data = r.json()
+                data = self._request_json(next_url, context="Reactions paging")
             else:
-                try:
-                    data = self.graph_get(endpoint, params)
-                except Exception:
-                    # Reactions könnten nicht verfügbar sein
-                    break
+                data = self.graph_get(endpoint, params)
             for reaction in data.get("data", []):
                 yield reaction
             paging = data.get("paging", {})
@@ -471,10 +596,7 @@ class FacebookArchiver:
         next_url = None
         while True:
             if next_url:
-                r = self.session.get(next_url, timeout=60)
-                if r.status_code != 200:
-                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                data = r.json()
+                data = self._request_json(next_url, context="Comments paging")
             else:
                 data = self.graph_get(endpoint, params)
             for c in data.get("data", []):
@@ -499,10 +621,7 @@ class FacebookArchiver:
         next_url = None
         while True:
             if next_url:
-                r = self.session.get(next_url, timeout=60)
-                if r.status_code != 200:
-                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                data = r.json()
+                data = self._request_json(next_url, context="Conversations paging")
             else:
                 data = self.graph_get(endpoint, params)
             for conv in data.get("data", []):
@@ -519,10 +638,7 @@ class FacebookArchiver:
         next_url = None
         while True:
             if next_url:
-                r = self.session.get(next_url, timeout=60)
-                if r.status_code != 200:
-                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                data = r.json()
+                data = self._request_json(next_url, context="Messages paging")
             else:
                 data = self.graph_get(endpoint, params)
             for msg in data.get("data", []):
@@ -551,10 +667,7 @@ class FacebookArchiver:
         with tqdm(desc="Albums", unit="album") as bar:
             while True:
                 if next_url:
-                    r = self.session.get(next_url, timeout=60)
-                    if r.status_code != 200:
-                        raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                    data = r.json()
+                    data = self._request_json(next_url, context="Albums paging")
                 else:
                     data = self.graph_get(endpoint, params)
                 for album in data.get("data", []):
@@ -584,10 +697,7 @@ class FacebookArchiver:
         next_url = None
         while True:
             if next_url:
-                r = self.session.get(next_url, timeout=60)
-                if r.status_code != 200:
-                    raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                data = r.json()
+                data = self._request_json(next_url, context="Photos paging")
             else:
                 data = self.graph_get(endpoint, params)
             for photo in data.get("data", []):
@@ -629,7 +739,7 @@ class FacebookArchiver:
         if self.since:
             base_params["since"] = to_utc_epoch(self.since)
         if self.until:
-            base_params["until"] = to_utc_epoch(self.until)
+            base_params["until"] = to_api_until_epoch(self.until)
 
         seen_ids: set[str] = set()
         filters = ["upcoming", "past"]
@@ -640,14 +750,13 @@ class FacebookArchiver:
                 next_url = None
                 while True:
                     if next_url:
-                        r = self.session.get(next_url, timeout=60)
-                        if r.status_code != 200:
-                            raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                        data = r.json()
+                        data = self._request_json(next_url, context="Events paging")
                     else:
                         try:
                             data = self.graph_get(endpoint, params)
                         except RuntimeError as exc:
+                            if is_authentication_error(exc):
+                                raise
                             # Wenn der Filter nicht unterstützt wird, loggen und abbrechen
                             self.append_sources_manifest(f"WARN events ({time_filter}): {exc}")
                             break
@@ -691,14 +800,13 @@ class FacebookArchiver:
                 next_url = None
                 while True:
                     if next_url:
-                        r = self.session.get(next_url, timeout=60)
-                        if r.status_code != 200:
-                            raise RuntimeError(f"Graph paging error {r.status_code}: {r.text}")
-                        data = r.json()
+                        data = self._request_json(next_url, context="Live videos paging")
                     else:
                         try:
                             data = self.graph_get(endpoint, params)
                         except Exception as e:
+                            if is_authentication_error(e):
+                                raise
                             self.append_sources_manifest(f"WARN live_videos ({status}): {e}")
                             break
                     for video in data.get("data", []):
@@ -736,11 +844,7 @@ class FacebookArchiver:
             self.download_video_from_post(post_id, attachment)
             return
 
-        src = (
-            (media.get("image") or {}).get("src")
-            or attachment.get("unshimmed_url")
-            or attachment.get("url")
-        )
+        src = (media.get("image") or {}).get("src")
 
         if not src:
             return
@@ -790,11 +894,15 @@ class FacebookArchiver:
     @staticmethod
     def _is_external_video_embed(url: str) -> bool:
         parsed = urlparse(url)
-        host = parsed.netloc.lower()
-        path = parsed.path.lower()
-        if host in {"youtube.com", "www.youtube.com", "m.youtube.com"} and path.startswith("/embed/"):
-            return True
-        return host == "youtu.be"
+        host = (parsed.hostname or "").lower()
+        return host in {
+            "youtube.com",
+            "www.youtube.com",
+            "m.youtube.com",
+            "youtube-nocookie.com",
+            "www.youtube-nocookie.com",
+            "youtu.be",
+        }
 
     def _placeholder_image_reason(self, payload: bytes) -> Optional[str]:
         dims = self._png_dimensions(payload) or self._gif_dimensions(payload)
@@ -808,7 +916,7 @@ class FacebookArchiver:
         if expected_kind == "video" and self._is_external_video_embed(url):
             raise MediaDownloadRejected("external video embed instead of downloadable video")
 
-        r = self.session.get(url, timeout=60, stream=True)
+        r = self.media_session.get(url, timeout=(10, 30), stream=True)
         if r.status_code != 200:
             raise MediaDownloadRejected(f"HTTP {r.status_code}")
 
@@ -876,7 +984,9 @@ class FacebookArchiver:
         if not src and post_id:
             try:
                 details = self.get_post_details(post_id)
-            except Exception:
+            except Exception as exc:
+                if is_authentication_error(exc):
+                    raise
                 details = {}
             attachments = (details.get("attachments") or {}).get("data") or []
             for att in attachments:
@@ -898,6 +1008,8 @@ class FacebookArchiver:
                 data = self.graph_get(lookup_id, {"fields": "source"})
                 src = data.get("source")
             except Exception as e:
+                if is_authentication_error(e):
+                    raise
                 self.append_sources_manifest(f"WARN video source {lookup_id}: {e}")
                 return None
 
@@ -969,7 +1081,7 @@ class FacebookArchiver:
         pi = self.page_info
         now = datetime.now(timezone.utc).isoformat() + "Z"
         txt = f"""
-Facebook Archiv – erzeugt mit fb_archiver.py
+Facebook Archiv – erzeugt mit fb_archiver {TOOL_VERSION}
 Seite: {pi.name} (ID: {pi.id})
 Link: {pi.link}
 
@@ -1001,7 +1113,7 @@ Hinweise:
 
     def append_sources_manifest(self, line: str):
         with open(self.path("manifests", "sources.txt"), "a", encoding="utf-8") as f:
-            f.write(line.rstrip("\n") + "\n")
+            f.write(redact_access_tokens(line).rstrip("\n") + "\n")
 
     def _manifest_relpath(self, file_path: Optional[str]) -> Optional[str]:
         if not file_path:
@@ -1031,6 +1143,9 @@ Hinweise:
         # Basis-Infos & Doku
         self.get_page_info()
         self.write_readme()
+        with open(self.path("manifests", "sources.txt"), "w", encoding="utf-8"):
+            pass
+        self.append_sources_manifest(f"TOOL_VERSION={TOOL_VERSION}")
         self.append_sources_manifest(f"GRAPH_BASE={self.graph_base}")
         self.append_sources_manifest(f"PAGE={self.page} -> {self.page_info.id}")
         if self.since:
@@ -1185,6 +1300,8 @@ Hinweise:
                     store_record(comment_records, c.get("id"), c, fallback_prefix="comment")
                     store_record(comments_rows_map, c.get("id"), comment_row, fallback_prefix="comment_row")
             except Exception as e:
+                if is_authentication_error(e):
+                    raise
                 self.append_sources_manifest(f"WARN comments for {pid}: {e}")
 
             # Reaktions-Details holen (WER hat WIE reagiert)
@@ -1201,6 +1318,8 @@ Hinweise:
                     store_record(reaction_records, reaction_key, reaction, fallback_prefix="reaction")
                     store_record(reactions_rows_map, reaction_key, reaction_row, fallback_prefix="reaction_row")
             except Exception as e:
+                if is_authentication_error(e):
+                    raise
                 self.append_sources_manifest(f"WARN reactions for {pid}: {e}")
 
             # Medien (best effort)
@@ -1376,6 +1495,8 @@ Hinweise:
                         }
                     )
         except Exception as e:
+            if is_authentication_error(e):
+                raise
             self.append_sources_manifest(f"WARN conversations/messages: {e}")
 
         conv_jsonl.close()
@@ -1455,9 +1576,13 @@ Hinweise:
                         store_record(photos_rows_map, photo.get("id"), photo_row, fallback_prefix="photo_row")
 
                 except Exception as e:
+                    if is_authentication_error(e):
+                        raise
                     self.append_sources_manifest(f"WARN photos for album {album_id}: {e}")
 
         except Exception as e:
+            if is_authentication_error(e):
+                raise
             self.append_sources_manifest(f"WARN albums: {e}")
 
         for record in album_records.values():
@@ -1516,6 +1641,8 @@ Hinweise:
                 store_record(events_rows_map, event_id, event_row, fallback_prefix="event_row")
 
         except Exception as e:
+            if is_authentication_error(e):
+                raise
             self.append_sources_manifest(f"WARN events: {e}")
 
         for record in event_records.values():
@@ -1562,6 +1689,8 @@ Hinweise:
                 store_record(live_videos_rows_map, video_id, live_video_row, fallback_prefix="live_video_row")
 
         except Exception as e:
+            if is_authentication_error(e):
+                raise
             self.append_sources_manifest(f"WARN live_videos: {e}")
 
         for record in live_video_records.values():
@@ -1584,19 +1713,20 @@ Hinweise:
         print(f"Fertig. Archiv unter: {self.outdir}")
     
     
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Facebook Page Archiv (Graph API)")
+    ap.add_argument("--version", action="version", version=f"fb_archiver {TOOL_VERSION}")
     ap.add_argument(
         "--page", required=True, help="Seitenname, ID oder URL (z.B. https://www.facebook.com/StadtMannheim)"
     )
     ap.add_argument(
         "--access-token",
-        required=True,
-        help="Page Access Token mit pages_read_* Rechten",
+        default=os.getenv("FB_PAGE_TOKEN"),
+        help="Page Access Token; alternativ aus FB_PAGE_TOKEN",
     )
     ap.add_argument("--out", default="./fb_archive_out", help="Ausgabeverzeichnis")
-    ap.add_argument("--since", help="ab Datum (YYYY-MM-DD)")
-    ap.add_argument("--until", help="bis Datum (YYYY-MM-DD)")
+    ap.add_argument("--since", type=parse_cli_date, help="ab Datum (YYYY-MM-DD)")
+    ap.add_argument("--until", type=parse_cli_date, help="bis einschließlich Datum (YYYY-MM-DD)")
     ap.add_argument(
         "--graph-api-version",
         default=DEFAULT_GRAPH_API_VERSION,
@@ -1609,12 +1739,22 @@ def parse_args() -> argparse.Namespace:
         "--no-media", action="store_true", help="keine Medien herunterladen"
     )
     ap.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="bestehende, nicht leere Jahresordner vor dem Export ersetzen",
+    )
+    ap.add_argument(
         "--limit",
         type=int,
         default=100,
         help="API-Seitenlimit pro Anfrage (Standard 100)",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
+
+    if not args.access_token:
+        ap.error("Access Token fehlt: --access-token angeben oder FB_PAGE_TOKEN setzen.")
+    if args.since and args.until and args.since > args.until:
+        ap.error("--since darf nicht nach --until liegen.")
 
     # Falls eine vollständige URL übergeben wurde -> Seitennamen extrahieren
     if args.page.startswith("http://") or args.page.startswith("https://"):
@@ -1625,14 +1765,7 @@ def parse_args() -> argparse.Namespace:
 
     return args
 
-
-
-
-
-from pathlib import Path
-
-def run_split_by_years(args):
-    import datetime
+def run_split_by_years(args) -> bool:
     base_arch = FacebookArchiver(
         page=args.page,
         access_token=args.access_token,
@@ -1662,10 +1795,11 @@ def run_split_by_years(args):
         end_year = int(args.until.split("-")[0])
     else:
         # Kein --until: verwende aktuelles Jahr
-        end_year = datetime.datetime.now(timezone.utc).year
+        end_year = datetime.now(timezone.utc).year
 
     print(f"[INFO] Archivierung von {start_year} bis {end_year} für {page_info.name}")
 
+    failures = 0
     for year in range(start_year, end_year + 1):
         # Bestimme Jahresgrenzen, aber respektiere User-Parameter
         year_since = f"{year}-01-01"
@@ -1677,24 +1811,40 @@ def run_split_by_years(args):
         if args.until and year == end_year:
             year_until = args.until
 
-        year_out = str(Path(args.out) / str(year))
+        year_path = Path(args.out) / str(year)
+        year_out = str(year_path)
         print(f"[INFO] -> Jahr {year} ({year_since} bis {year_until})")
-        arch = FacebookArchiver(
-            page=args.page,
-            access_token=args.access_token,
-            outdir=year_out,
-            since=year_since,
-            until=year_until,
-            media=not args.no_media,
-            limit=args.limit,
-            graph_api_version=args.graph_api_version,
-        )
         try:
+            prepare_output_directory(year_path, overwrite=args.overwrite)
+            arch = FacebookArchiver(
+                page=args.page,
+                access_token=args.access_token,
+                outdir=year_out,
+                since=year_since,
+                until=year_until,
+                media=not args.no_media,
+                limit=args.limit,
+                graph_api_version=args.graph_api_version,
+            )
             arch.run()
         except Exception as e:
-            print(f"[WARN] Fehler bei Jahr {year}: {e}")
+            failures += 1
+            print(f"[ERROR] Fehler bei Jahr {year}: {e}", file=sys.stderr)
+            if is_authentication_error(e):
+                print(
+                    "[ERROR] Authentifizierung ist ungültig; weitere Jahre werden nicht versucht.",
+                    file=sys.stderr,
+                )
+                break
+
+    return failures == 0
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    run_split_by_years(args)
+    cli_args = parse_args()
+    try:
+        success = run_split_by_years(cli_args)
+    except Exception as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0 if success else 1)
