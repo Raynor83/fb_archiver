@@ -1359,8 +1359,8 @@ Hinweise:
             for conv in self.get_conversations():
                 conv_id = conv.get("id")
                 conv_link = conv.get("link")
-                mailbox_id = normalize_str(conv.get("mailbox_id"))
-                thread_type = normalize_str(conv.get("thread_type"))
+                mailbox_id = normalize_str(conv.get("mailbox_id")) or self.page_info.id
+                thread_type = normalize_str(conv.get("thread_type")) or "FB_MESSAGE"
                 selected_item_id = sanitize_thread_id(conv.get("selected_item_id"))
 
                 def update_meta_from_link(link_value: Optional[str]) -> None:
@@ -1373,11 +1373,11 @@ Hinweise:
                         mailbox_candidate = normalize_str((query.get("mailbox_id") or [None])[0])
                         thread_candidate = normalize_str((query.get("thread_type") or [None])[0])
                         selected_candidate = sanitize_thread_id((query.get("selected_item_id") or [None])[0])
-                        if not mailbox_id:
+                        if mailbox_candidate:
                             mailbox_id = mailbox_candidate
-                        if not thread_type:
+                        if thread_candidate:
                             thread_type = thread_candidate
-                        if not selected_item_id:
+                        if selected_candidate:
                             selected_item_id = selected_candidate
                     except Exception:
                         return
@@ -1400,11 +1400,7 @@ Hinweise:
                     if not thread_type:
                         thread_type = normalize_str(msg.get("thread_type"))
                     if not selected_item_id:
-                        selected_item_id = sanitize_thread_id(
-                            msg.get("selected_item_id")
-                            or msg.get("conversation_id")
-                            or msg.get("id")
-                        )
+                        selected_item_id = sanitize_thread_id(msg.get("selected_item_id"))
 
                     if mailbox_id:
                         msg.setdefault("mailbox_id", mailbox_id)
