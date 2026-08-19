@@ -65,6 +65,7 @@ def test_run_writes_complete_archive_structure(tmp_path):
             [
                 {
                     "id": "conversation1",
+                    "link": "/168701373143130/inbox/28413306578255898/?section=messages",
                     "updated_time": "2025-12-31T14:00:00+0000",
                     "participants": {"data": [{"name": "Person"}]},
                 }
@@ -155,6 +156,18 @@ def test_run_writes_complete_archive_structure(tmp_path):
     post = json.loads((tmp_path / "data" / "posts.jsonl").read_text(encoding="utf-8"))
     assert post["id"] == "page_post1"
     assert post["shares"]["count"] == 2
+
+    conversation = json.loads(
+        (tmp_path / "data" / "conversations.jsonl").read_text(encoding="utf-8")
+    )
+    assert "selected_item_id" not in conversation
+    assert conversation["thread_type"] == "FB_MESSAGE"
+
+    message = json.loads(
+        (tmp_path / "data" / "messages.jsonl").read_text(encoding="utf-8")
+    )
+    assert "selected_item_id" not in message
+    assert message["thread_type"] == "FB_MESSAGE"
 
     sources = (tmp_path / "manifests" / "sources.txt").read_text(encoding="utf-8")
     assert "GRAPH_BASE=https://graph.facebook.com/v26.0" in sources

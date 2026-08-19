@@ -637,7 +637,7 @@ function guessThreadMeta(pageId, conversation, messages, existingLink){
   const trySetFromLink = (link) => {
     if(!link || typeof link !== 'string') return;
     try{
-      const url = new URL(link);
+      const url = new URL(link, 'https://www.facebook.com');
       const mailboxParam = url.searchParams.get('mailbox_id');
       const threadParam = url.searchParams.get('thread_type');
       if(mailboxParam && !meta.mailboxId) meta.mailboxId = mailboxParam.trim();
@@ -664,13 +664,6 @@ function guessThreadMeta(pageId, conversation, messages, existingLink){
       const platform = msg.platform.trim().toLowerCase();
       if(platform.includes('instagram')) meta.threadType = 'IG_MESSAGE';
     }
-    // ID-based detection as last resort
-    if(!meta.threadType){
-      const fromId = msg?.from?.id;
-      const toIds = (msg?.to?.data || []).map(entry => entry?.id);
-      const igId = (val) => typeof val === 'string' && /^17[89]/.test(val.trim());
-      if(igId(fromId) || toIds.some(igId)) meta.threadType = 'IG_MESSAGE';
-    }
   }
 
   // PRIORITY 2: Check conversation object
@@ -695,10 +688,21 @@ function guessThreadMeta(pageId, conversation, messages, existingLink){
     meta.mailboxId = sanitizedPage;
   }
   if(!meta.threadType){
-    meta.threadType = (meta.mailboxId && meta.mailboxId.startsWith('178')) ? 'IG_MESSAGE' : 'FACEBOOK_MESSAGE';
+    meta.threadType = 'FB_MESSAGE';
   }
 
   return meta;
+}
+
+function selectedItemIdFromLink(link){
+  if(!link || typeof link !== 'string') return '';
+  try{
+    const url = new URL(link, 'https://www.facebook.com');
+    if(url.hostname !== 'business.facebook.com') return '';
+    return sanitizeThreadId(url.searchParams.get('selected_item_id'));
+  }catch{
+    return '';
+  }
 }
 
 function buildBusinessInboxLink(pageId, selectedItemId, existingLink, meta){
@@ -706,13 +710,16 @@ function buildBusinessInboxLink(pageId, selectedItemId, existingLink, meta){
   const sanitizedPage = pageId ? String(pageId).trim() : '';
   const sanitizedThread = sanitizeThreadId(selectedItemId);
   const mailboxId = meta && meta.mailboxId ? meta.mailboxId : sanitizedPage;
-  const threadType = meta && meta.threadType ? meta.threadType : '';
+  const rawThreadType = meta && meta.threadType ? meta.threadType : '';
+  const threadType = rawThreadType === 'FACEBOOK_MESSAGE' ? 'FB_MESSAGE' : rawThreadType;
 
   const params = new URLSearchParams();
   if(sanitizedPage) params.set('asset_id', sanitizedPage);
   if(mailboxId) params.set('mailbox_id', mailboxId);
-  if(threadType) params.set('thread_type', threadType);
-  if(sanitizedThread) params.set('selected_item_id', sanitizedThread);
+  if(sanitizedThread){
+    if(threadType) params.set('thread_type', threadType);
+    params.set('selected_item_id', sanitizedThread);
+  }
   params.set('nav_ref', 'manage_page_ap_plus_default');
 
   const url = new URL(base);
@@ -918,34 +925,13 @@ function buildConversationThreads(){
         ? firstLinkSource.conversation_link.trim()
         : '');
 
-    let linkSelectedItemId = '';
-    if(initialLinkCandidate){
-      try{
-        const url = new URL(initialLinkCandidate);
-        linkSelectedItemId = url.searchParams.get('selected_item_id') || '';
-      }catch{
-        linkSelectedItemId = '';
-      }
-    }
+    const linkSelectedItemId = selectedItemIdFromLink(initialLinkCandidate);
 
-    // Priorität: Extrahierte Metadaten aus Python-Script nutzen
-    // 1. Aus Conversation-Objekt (wurde vom Python-Script aktualisiert)
-    // 2. Aus erster Message (falls vorhanden)
-    const extractedFromConv = conv && conv.selected_item_id && typeof conv.selected_item_id === 'string' && conv.selected_item_id.trim();
-    const extractedFromMsg = messages.find(m => m.selected_item_id && typeof m.selected_item_id === 'string' && m.selected_item_id.trim());
+    // Only Business Suite URLs contain a usable selected_item_id. Graph API
+    // conversation, participant and legacy inbox IDs are not interchangeable.
+    const selectedItemId = linkSelectedItemId;
 
-    const candidateIds = [
-      extractedFromConv, // Priority 1: Conversation object (updated by Python)
-      extractedFromMsg && extractedFromMsg.selected_item_id, // Priority 2: From messages
-      linkSelectedItemId, // Priority 3: From parsed link
-      conv && conv.id, // Priority 4: Conversation ID
-      id, // Priority 5: Thread ID
-      messages[0] && messages[0].conversation_id,
-      messages[0] && messages[0].id,
-    ];
-    const selectedItemId = candidateIds.map(sanitizeThreadId).find(Boolean) || '';
-
-    // Metadaten mit Priorität auf Conversation-Objekt (wurde vom Python-Script aktualisiert)
+    // Plattform- und Mailbox-Metadaten aus dem Archiv übernehmen.
     const meta = guessThreadMeta(pageId, conv, messages, initialLinkCandidate);
     const normalizedLink = buildBusinessInboxLink(pageId, selectedItemId, initialLinkCandidate, meta);
     const snippet = conv && conv.snippet ? conv.snippet : '';
